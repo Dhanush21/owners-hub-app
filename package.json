@@ -22,7 +22,9 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
+    "@capacitor/camera": "^7.0.2",
     "@capacitor/core": "^7.4.3",
+    "@capacitor/splash-screen": "^7.0.3",
     "@genkit-ai/google-genai": "^1.18.0",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
@@ -62,7 +64,7 @@
     "dotenv": "^17.2.2",
     "embla-carousel-react": "^8.6.0",
     "express": "^5.1.0",
-    "firebase": "^12.2.1",
+    "firebase": "^12.3.0",
     "genkit": "^1.18.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",

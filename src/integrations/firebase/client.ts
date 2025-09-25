@@ -19,6 +19,7 @@ if (!getApps().length) {
   app = getApps()[0]!;
 }
 
+export { app };
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
