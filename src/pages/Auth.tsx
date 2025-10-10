@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Home, UserPlus, LogIn, Users } from 'lucide-react';
+import { Loader2, UserPlus, LogIn, Users } from 'lucide-react';
+import logo from "@/assets/logo.png"
 
 const Auth = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -199,10 +200,10 @@ const Auth = () => {
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Home className="h-8 w-8 text-primary" />
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <img src={logo} alt="CoLive Logo"   className="h-10 w-10" />
             <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-              CoHub
+              CoLive
             </h1>
           </div>
           <p className="text-muted-foreground">

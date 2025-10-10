@@ -5,6 +5,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import mobile-specific styles */
+
 /* Clean Design System - Ready for customization */
 
 @layer base {

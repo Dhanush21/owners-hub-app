@@ -22,7 +22,7 @@ const Settings = () => {
       icon: User,
       title: "Profile",
       description: "Update your personal information",
-      onClick: () => {}
+      onClick: () => navigate('/profile')
     },
     {
       icon: UserPlus,

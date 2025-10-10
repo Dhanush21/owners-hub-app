@@ -42,6 +42,7 @@ const Chatbot = () => {
   // Mobile keyboard handling
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -396,9 +397,9 @@ const maybeNavigate = (text: string): boolean => {
         </div>
 
         {/* Enhanced Messages Container - Mobile Optimized */}
-        <Card className="flex-1 mb-2 sm:mb-4 overflow-hidden shadow-xl border-border/50 backdrop-blur-sm bg-background/95 animate-scale-in min-h-0">
+        <Card className="flex-1 mb-2 sm:mb-4 overflow-hidden shadow-xl border-border/50 backdrop-blur-sm bg-background/95 animate-scale-in min-h-[400px] sm:min-h-[330px]">
           <CardContent className="p-0 h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-3 sm:space-y-6 scroll-smooth overscroll-contain mobile-scroll">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-6 scroll-smooth overscroll-contain mobile-scroll">
               {messages.map((message, index) => (
                 <div
                   key={message.id}
@@ -488,72 +489,115 @@ const maybeNavigate = (text: string): boolean => {
             </div>
 
             {/* Enhanced Suggested Questions - Mobile Optimized */}
-            {messages.length === 1 && !isLoading && (
-              <div className="p-3 sm:p-6 border-t border-border/50 bg-gradient-to-r from-background to-muted/10 animate-fade-in">
-                <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4 font-medium">💡 Try these suggestions:</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                  {suggestedQuestions.map((question) => (
-                    <Button
-                      key={question}
-                      variant="outline"
-                      size="sm"
-                      className="text-left justify-start h-auto py-2 sm:py-3 px-3 sm:px-4 bg-gradient-to-r from-background to-muted/5 hover:from-primary/5 hover:to-primary/10 hover:border-primary/20 text-xs sm:text-sm text-muted-foreground hover:text-primary transition-all duration-200 hover-scale border-dashed"
-                      onClick={() => handleSuggestionClick(question)}
-                    >
-                      <Sparkles className="mr-1.5 sm:mr-2 h-3 w-3 text-primary/60" />
-                      <span className="truncate">{question}</span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* {messages.length === 1 && !isLoading && (
+              <div className="p-3 sm:p-6 border-t border-border/50 bg-gradient-to-r from-background to-muted/10 animate-fade-in max-h-60 overflow-y-auto">
+  <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4 font-medium">
+    💡 Try these suggestions:
+  </p>
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+    {suggestedQuestions.map((question) => (
+      <Button
+        key={question}
+        variant="outline"
+        size="sm"
+        className="text-left justify-start h-auto py-2 sm:py-3 px-3 sm:px-4 bg-gradient-to-r from-background to-muted/5 hover:from-primary/5 hover:to-primary/10 hover:border-primary/20 text-xs sm:text-sm text-muted-foreground hover:text-primary transition-all duration-200 hover-scale border-dashed"
+        onClick={() => handleSuggestionClick(question)}
+      >
+        <Sparkles className="mr-1.5 sm:mr-2 h-3 w-3 text-primary/60" />
+        <span className="truncate">{question}</span>
+      </Button>
+    ))}
+  </div>
+</div>
+
+            )} */}
           </CardContent>
         </Card>
 
-        {/* Enhanced Input Section - Mobile Optimized */}
-        <div className={`
-          flex-shrink-0 transition-all duration-300 ease-out keyboard-adjust
-          ${isKeyboardOpen ? 'mb-2' : 'mb-4'}
-        `}>
-          <Card className="shadow-lg border-border/30 backdrop-blur-sm bg-background/95 animate-scale-in">
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex gap-2 sm:gap-3">
-                <div className="flex-1 relative">
-                  <Textarea
-                    ref={inputRef}
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder="Ask me anything about your property management..."
-                    className="min-h-[40px] sm:min-h-[44px] max-h-24 sm:max-h-32 resize-none pr-10 sm:pr-12 text-sm border-border/50 focus:border-primary/50 transition-all duration-200 rounded-xl mobile-input mobile-focus touch-target"
-                    disabled={isLoading}
-                    style={{ 
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'hsl(var(--muted)) transparent'
-                    }}
-                  />
-                  {inputMessage && !isLoading && (
-                    <div className="absolute right-2 sm:right-3 bottom-2 sm:bottom-3 text-xs text-muted-foreground bg-background/80 px-1.5 py-0.5 rounded backdrop-blur-sm">
-                      {inputMessage.length}/500
-                    </div>
-                  )}
-                </div>
-                <Button
-                  onClick={sendMessage}
-                  disabled={!inputMessage.trim() || isLoading}
-                  size="icon"
-                  className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary/80 shadow-lg hover:shadow-xl transition-all duration-200 hover-scale disabled:opacity-50 disabled:cursor-not-allowed touch-target"
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4 sm:h-5 sm:w-5" />
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+       {/* Enhanced Input Section - with Try Suggestions Toggle */}
+<div
+  className={`flex-shrink-0 transition-all duration-300 ease-out keyboard-adjust`}
+>
+  <Card className="shadow-lg border-border/30 backdrop-blur-sm bg-background/95 animate-scale-in relative">
+    <CardContent className="p-3 sm:p-4">
+      <div className="flex items-end gap-2 sm:gap-3 relative">
+        <div className="flex-1 relative">
+          <Textarea
+            ref={inputRef}
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="Ask me anything about your property management..."
+            className="min-h-[40px] sm:min-h-[44px] max-h-24 sm:max-h-32 resize-none pr-24 sm:pr-28 text-sm border-border/50 focus:border-primary/50 transition-all duration-200 rounded-xl mobile-input mobile-focus touch-target"
+            disabled={isLoading}
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "hsl(var(--muted)) transparent",
+            }}
+          />
+
+          {inputMessage && !isLoading && (
+            <div className="absolute right-20 sm:right-24 bottom-2 sm:bottom-3 text-xs text-muted-foreground bg-background/80 px-1.5 py-0.5 rounded backdrop-blur-sm">
+              {inputMessage.length}/500
+            </div>
+          )}
         </div>
+
+        {/* Try Suggestions Button */}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl border-dashed bg-gradient-to-r from-background to-muted/10 hover:from-primary/5 hover:to-primary/10 hover:border-primary/30 transition-all duration-200"
+          onClick={() => setShowSuggestions((prev) => !prev)}
+        >
+          <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-primary/70" />
+        </Button>
+
+        <Button
+          onClick={sendMessage}
+          disabled={!inputMessage.trim() || isLoading}
+          size="icon"
+          className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary/80 shadow-lg hover:shadow-xl transition-all duration-200 hover-scale disabled:opacity-50 disabled:cursor-not-allowed touch-target"
+        >
+          {isLoading ? (
+            <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4 sm:h-5 sm:w-5" />
+          )}
+        </Button>
+      </div>
+
+      {/* Collapsible Suggestions - Above Input */}
+      {showSuggestions && (
+        <div className="absolute bottom-full left-0 w-full mb-2 sm:mb-3 rounded-xl p-3 sm:p-4 bg-white border border-border/50 shadow-lg animate-slide-up overflow-y-auto max-h-60 z-50">
+          <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4 font-medium">
+            💡 Try these suggestions:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+            {suggestedQuestions.map((question) => (
+              <Button
+                key={question}
+                variant="outline"
+                size="sm"
+                className="text-left justify-start h-auto py-2 sm:py-3 px-3 sm:px-4 bg-gradient-to-r from-background to-muted/5 hover:from-primary/5 hover:to-primary/10 hover:border-primary/20 text-xs sm:text-sm text-muted-foreground hover:text-primary transition-all duration-200 hover-scale border-dashed"
+                onClick={() => {
+                  handleSuggestionClick(question);
+                  setShowSuggestions(false);
+                }}
+              >
+                <Sparkles className="mr-1.5 sm:mr-2 h-3 w-3 text-primary/60" />
+                <span className="truncate">{question}</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+    </CardContent>
+  </Card>
+</div>
+
+
       </main>
 
       {!isKeyboardOpen && <BottomNavigation />}

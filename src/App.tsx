@@ -17,6 +17,7 @@ const Subscription = lazy(() => import("./pages/Subscription"));
 const CrashlyticsTest = lazy(() => import("./pages/CrashlyticsTest"));
 const Auth = lazy(() => import("./pages/Auth"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Profile = lazy(() => import("./pages/Profile"));
 
 // Optimize QueryClient with better defaults
 const queryClient = new QueryClient({
@@ -56,6 +57,7 @@ const App = () => (
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/subscription" element={<ProtectedRoute><Subscription /></ProtectedRoute>} />
             <Route path="/crashlytics-test" element={<ProtectedRoute><CrashlyticsTest /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
