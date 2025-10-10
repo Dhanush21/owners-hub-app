@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CreditCard, User, Shield, Bell, UserPlus, Settings2 } from "lucide-react";
+import { CreditCard, User, Shield, Bell, UserPlus, Settings2, Bug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
@@ -41,6 +41,12 @@ const Settings = () => {
       title: "Privacy & Security",
       description: "Manage your privacy and security settings",
       onClick: () => {}
+    },
+    {
+      icon: Bug,
+      title: "Crashlytics Test",
+      description: "Test Firebase Crashlytics functionality",
+      onClick: () => navigate('/crashlytics-test')
     }
   ];
 
