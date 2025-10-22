@@ -6,14 +6,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { propertyAPI } from "@/services/api";
+import { Loader2 } from "lucide-react";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onPropertyAdded?: () => void; // Callback to refresh properties list
 }
 
-const AddPropertyModal = ({ isOpen, onClose }: AddPropertyModalProps) => {
+const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModalProps) => {
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     address: "",
     unit: "",
@@ -24,29 +28,68 @@ const AddPropertyModal = ({ isOpen, onClose }: AddPropertyModalProps) => {
     description: ""
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
     
-    // Here you would typically send the data to your backend
-    console.log("New property:", formData);
-    
-    toast({
-      title: "Property Added",
-      description: "New property has been successfully added to your portfolio.",
-    });
-    
-    // Reset form
-    setFormData({
-      address: "",
-      unit: "",
-      bedrooms: "",
-      bathrooms: "",
-      rent: "",
-      propertyType: "",
-      description: ""
-    });
-    
-    onClose();
+    try {
+      // Validate required fields
+      if (!formData.address || !formData.unit || !formData.propertyType || !formData.bedrooms || !formData.bathrooms || !formData.rent) {
+        toast({
+          title: "Validation Error",
+          description: "Please fill in all required fields.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      // Prepare data for API call
+      const propertyData = {
+        address: formData.address,
+        unit: formData.unit,
+        propertyType: formData.propertyType,
+        bedrooms: parseInt(formData.bedrooms),
+        bathrooms: parseFloat(formData.bathrooms),
+        rent: parseFloat(formData.rent),
+        status: "active"
+      };
+
+      // Call the API to create the property
+      await propertyAPI.create(propertyData);
+      
+      toast({
+        title: "Property Added",
+        description: "New property has been successfully added to your portfolio.",
+      });
+      
+      // Reset form
+      setFormData({
+        address: "",
+        unit: "",
+        bedrooms: "",
+        bathrooms: "",
+        rent: "",
+        propertyType: "",
+        description: ""
+      });
+      
+      // Refresh the properties list
+      if (onPropertyAdded) {
+        onPropertyAdded();
+      }
+      
+      onClose();
+    } catch (error) {
+      console.error("Error adding property:", error);
+      toast({
+        title: "Error",
+        description: "Failed to add property. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -158,8 +201,15 @@ const AddPropertyModal = ({ isOpen, onClose }: AddPropertyModalProps) => {
             <Button type="button" variant="outline" onClick={onClose} className="flex-1">
               Cancel
             </Button>
-            <Button type="submit" className="flex-1">
-              Add Property
+            <Button type="submit" className="flex-1" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                "Add Property"
+              )}
             </Button>
           </div>
         </form>
