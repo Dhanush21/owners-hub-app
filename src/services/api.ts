@@ -45,6 +45,13 @@ const apiCall = async (endpoint: string, options: RequestInit = {}) => {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
       console.error('API Error:', error);
+      
+      // If there are validation errors, format them nicely
+      if (error.errors && Array.isArray(error.errors)) {
+        const validationErrors = error.errors.map((e: any) => `${e.path}: ${e.msg}`).join(', ');
+        throw new Error(validationErrors);
+      }
+      
       throw new Error(error.error || error.message || 'Request failed');
     }
 
@@ -295,15 +302,21 @@ export const dashboardAPI = {
 
 // ==================== AUTH ENDPOINTS ====================
 export const authAPI = {
-  // Register new user
+  // Register new user (creates user in database only, not Firebase Auth)
+  // Note: This uses the /users endpoint which only creates a database record.
+  // For full user registration with Firebase Auth, use the AuthContext.signUp method
   register: async (data: {
     email: string;
-    password: string;
     fullName: string;
     phone: string;
     role: string;
+    unit?: string;
+    monthlyRent?: number;
+    securityDeposit?: number;
+    leaseStart?: string;
+    leaseEnd?: string;
   }) => {
-    return apiCall('/auth/register', {
+    return apiCall('/users', {
       method: 'POST',
       body: JSON.stringify(data),
     });

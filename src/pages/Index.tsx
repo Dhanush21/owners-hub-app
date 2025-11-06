@@ -88,7 +88,7 @@ const Index = () => {
           <p className="text-muted-foreground mb-6">Monitor and manage your rental properties</p>
         </div>
 
-        <StatsCards />
+        <StatsCards issues={mockIssues} />
 
         <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground mb-6" size="lg">
           <Plus className="w-5 h-5 mr-2" />

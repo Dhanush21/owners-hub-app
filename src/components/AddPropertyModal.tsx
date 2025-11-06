@@ -198,7 +198,7 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
           </div>
 
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={onClose} className="flex-1">
+            <Button type="button" variant="outline" onClick={onClose} className="flex-1" disabled={isLoading}>
               Cancel
             </Button>
             <Button type="submit" className="flex-1" disabled={isLoading}>

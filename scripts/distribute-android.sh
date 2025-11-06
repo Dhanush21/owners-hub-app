@@ -29,11 +29,11 @@ npx cap sync android
 # Build Android APK
 echo "📱 Building Android APK..."
 cd android
-./gradlew assembleDebug
+./gradlew assembleRelease
 cd ..
 
 # Find the APK file
-APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
 
 if [ -z "$APK_PATH" ]; then
     echo "❌ APK file not found. Build may have failed."

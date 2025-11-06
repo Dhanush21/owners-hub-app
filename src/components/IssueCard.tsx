@@ -1,7 +1,9 @@
+import { memo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, User, Calendar, MapPin, CheckCircle, Clock, Play } from "lucide-react";
+import { AlertTriangle, User, Calendar, MapPin, CheckCircle, Clock, Play, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Issue {
   id: string;
@@ -18,6 +20,7 @@ interface Issue {
 interface IssueCardProps {
   issue: Issue;
   onStatusChange?: (issueId: string, newStatus: "pending" | "in-progress" | "resolved") => void;
+  isUpdating?: boolean;
 }
 
 const priorityColors = {
@@ -32,7 +35,7 @@ const statusColors = {
   resolved: "bg-green-100 text-green-800 border-green-200"
 };
 
-const IssueCard = ({ issue, onStatusChange }: IssueCardProps) => {
+const IssueCard = memo(({ issue, onStatusChange, isUpdating = false }: IssueCardProps) => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'pending': return <Clock className="w-4 h-4" />;
@@ -58,63 +61,107 @@ const IssueCard = ({ issue, onStatusChange }: IssueCardProps) => {
       default: return 'Update Status';
     }
   };
+  const currentStatus = issue.status || 'pending';
+  const isResolved = currentStatus === 'resolved';
+  
   return (
-    <Card className="border border-border hover:shadow-md transition-shadow">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-muted-foreground" />
-            <h3 className="font-semibold text-foreground">{issue.title}</h3>
+    <Card className={cn(
+      "border border-border hover:shadow-lg transition-all duration-300 border-l-4 transform",
+      isUpdating && "opacity-60 pointer-events-none scale-[0.98]",
+      !isUpdating && "hover:scale-[1.01]",
+      currentStatus === "resolved" && "border-l-green-500 bg-green-50/30 dark:bg-green-950/10",
+      currentStatus === "in-progress" && "border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/10",
+      currentStatus === "pending" && "border-l-yellow-500 bg-yellow-50/30 dark:bg-yellow-950/10"
+    )}>
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <div className="mt-0.5">
+              {isUpdating ? (
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-muted-foreground" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-foreground mb-1 leading-tight">{issue.title}</h3>
+            </div>
           </div>
-          <Badge className={priorityColors[issue.priority]}>
+          <Badge className={cn(priorityColors[issue.priority], "shrink-0")}>
             {issue.priority}
           </Badge>
         </div>
         
-        <div className="space-y-2 mb-3">
+        <div className="space-y-2 mb-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <User className="w-4 h-4" />
-            <span>{issue.reporter}</span>
+            <User className="w-4 h-4 shrink-0" />
+            <span className="truncate">{issue.reporter}</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Calendar className="w-4 h-4" />
+            <Calendar className="w-4 h-4 shrink-0" />
             <span>{issue.date}</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <MapPin className="w-4 h-4" />
+            <MapPin className="w-4 h-4 shrink-0" />
             <span>{issue.unit}</span>
           </div>
         </div>
         
-        <p className="text-sm text-muted-foreground mb-3">{issue.description}</p>
+        <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{issue.description}</p>
         
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <Badge variant="outline" className="text-xs">
             {issue.category}
           </Badge>
           <div className="flex items-center gap-2">
-            <Badge className={statusColors[issue.status || 'pending']}>
-              <div className="flex items-center gap-1">
-                {getStatusIcon(issue.status || 'pending')}
-                {issue.status ? issue.status.charAt(0).toUpperCase() + issue.status.slice(1) : 'Pending'}
+            <Badge className={cn(
+              statusColors[currentStatus], 
+              "transition-all duration-300",
+              isUpdating && "animate-pulse"
+            )}>
+              <div className="flex items-center gap-1.5">
+                {isUpdating ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  getStatusIcon(currentStatus)
+                )}
+                <span className="capitalize">{currentStatus.replace("-", " ")}</span>
               </div>
             </Badge>
-            {onStatusChange && issue.status !== 'resolved' && (
+            {onStatusChange && !isResolved && (
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onStatusChange(issue.id, getNextStatus(issue.status || 'pending') as "pending" | "in-progress" | "resolved")}
+                onClick={() => onStatusChange(issue.id, getNextStatus(currentStatus) as "pending" | "in-progress" | "resolved")}
+                disabled={isUpdating}
+                className="h-7 text-xs transition-all hover:scale-105"
               >
-                {getStatusActionText(issue.status || 'pending')}
+                {isUpdating ? (
+                  <>
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  getStatusActionText(currentStatus)
+                )}
               </Button>
             )}
-            {onStatusChange && issue.status === 'resolved' && (
+            {onStatusChange && isResolved && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => onStatusChange(issue.id, 'pending')}
+                disabled={isUpdating}
+                className="h-7 text-xs transition-all hover:scale-105"
               >
-                Reopen
+                {isUpdating ? (
+                  <>
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Reopen"
+                )}
               </Button>
             )}
           </div>
@@ -122,6 +169,8 @@ const IssueCard = ({ issue, onStatusChange }: IssueCardProps) => {
       </CardContent>
     </Card>
   );
-};
+});
+
+IssueCard.displayName = "IssueCard";
 
 export default IssueCard;

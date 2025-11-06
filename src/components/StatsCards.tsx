@@ -39,17 +39,25 @@ const StatsCards = ({ issues, loading = false }: StatsCardsProps) => {
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {stats.map((stat) => (
-        <Card key={stat.title} className="border border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg ${stat.bgColor} flex items-center justify-center`}>
-                <stat.icon className={`w-5 h-5 ${stat.color}`} />
+      {stats.map((stat, index) => (
+        <Card 
+          key={stat.title} 
+          className="border border-border hover:shadow-md transition-all duration-300 hover:scale-[1.02]"
+          style={{ animationDelay: `${index * 50}ms` }}
+        >
+          <CardContent className="p-5">
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl ${stat.bgColor} flex items-center justify-center shadow-sm transition-transform duration-300 hover:scale-110`}>
+                <stat.icon className={`w-6 h-6 ${stat.color}`} />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{stat.title}</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : stat.value}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{stat.title}</p>
+                <p className="text-2xl font-bold text-foreground transition-colors">
+                  {loading ? (
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  ) : (
+                    <span className="animate-in fade-in-50 duration-300">{stat.value}</span>
+                  )}
                 </p>
               </div>
             </div>

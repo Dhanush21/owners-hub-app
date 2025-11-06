@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Check, ArrowLeft } from "lucide-react";
+import { Check, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { db } from "@/integrations/firebase/client";
-import { collection, addDoc } from "firebase/firestore";
+import { paymentAPI } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 
 declare global {
   interface Window {
@@ -17,6 +17,7 @@ declare global {
 const Subscription = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { userProfile } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const plans = [
@@ -96,18 +97,13 @@ const Subscription = () => {
           image: '/favicon.ico',
           handler: async function (response: any) {
             try {
-              // Store subscription details in Firebase Firestore
-              await addDoc(collection(db, 'subscriptions'), {
-                payment_id: response.razorpay_payment_id,
-                plan: plan.name,
+              // Store payment in backend via API
+              await paymentAPI.create({
                 amount: plan.price,
-                currency: 'INR',
-                status: 'paid',
-                date: new Date().toISOString(),
-                user_email: 'user@example.com', // Replace with actual user email
-                user_id: 'user123', // Replace with actual user ID
-                features: plan.features,
-                period: plan.period
+                customerName: userProfile?.fullName || 'User',
+                customerEmail: userProfile?.email || '',
+                description: `${plan.name} Plan Subscription`,
+                paymentMethod: 'razorpay'
               });
 
               toast({
@@ -119,19 +115,19 @@ const Subscription = () => {
               setTimeout(() => {
                 navigate('/settings');
               }, 2000);
-            } catch (error) {
-              console.error('Error storing subscription:', error);
+            } catch (error: any) {
+              console.error('Error storing payment:', error);
               toast({
                 title: "Payment Processed",
-                description: "Payment successful but there was an issue storing details.",
+                description: error.message || "Payment successful but there was an issue storing details.",
                 variant: "destructive"
               });
             }
           },
           prefill: {
-            name: 'John Doe',
-            email: 'user@example.com',
-            contact: '9999999999'
+            name: userProfile?.fullName || 'User',
+            email: userProfile?.email || '',
+            contact: userProfile?.phone || ''
           },
           notes: {
             plan: plan.name,
@@ -229,7 +225,14 @@ const Subscription = () => {
                   onClick={() => handlePayment(plan)}
                   disabled={loading || plan.price === 0}
                 >
-                  {loading ? "Processing..." : plan.buttonText}
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    plan.buttonText
+                  )}
                 </Button>
               </CardContent>
             </Card>

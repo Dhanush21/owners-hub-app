@@ -29,11 +29,11 @@ call npx cap sync android
 REM Build Android APK
 echo 📱 Building Android APK...
 cd android
-call gradlew.bat assembleDebug
+call gradlew.bat assembleRelease
 cd ..
 
 REM Find the APK file
-for /r "android\app\build\outputs\apk\debug" %%f in (*.apk) do (
+for /r "android\app\build\outputs\apk\release" %%f in (*.apk) do (
     set "APK_PATH=%%f"
     goto :found
 )

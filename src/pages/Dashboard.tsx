@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, TrendingUp, Users, Home, Activity, Loader2 } from "lucide-react";
@@ -8,57 +8,26 @@ import IssueCard from "@/components/IssueCard";
 import BottomNavigation from "@/components/BottomNavigation";
 import AddPropertyModal from "@/components/AddPropertyModal";
 import { useAuth } from "@/context/AuthContext";
-import { dashboardAPI, issueAPI } from "@/services/api";
+import { dashboardAPI, issueAPI, propertyAPI, paymentAPI } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 type Status = "pending" | "in-progress" | "resolved";
-
-const mockIssues = [
-  {
-    id: "1",
-    title: "AC Unit Maintenance", 
-    priority: "high" as const,
-    reporter: "Property Manager",
-    date: "8/27/2025",
-    unit: "Unit 3A",
-    description: "Annual AC maintenance required",
-    category: "Maintenance",
-    status: "pending" as Status
-  },
-  {
-    id: "2", 
-    title: "Lease Renewal",
-    priority: "medium" as const,
-    reporter: "John Smith",
-    date: "8/26/2025", 
-    unit: "Unit 2B",
-    description: "Tenant requesting lease renewal",
-    category: "Administrative",
-    status: "in-progress" as Status
-  },
-  {
-    id: "3",
-    title: "Property Inspection",
-    priority: "low" as const,
-    reporter: "Inspector",
-    date: "8/22/2025",
-    unit: "Unit 1C", 
-    description: "Quarterly property inspection",
-    category: "Inspection",
-    status: "resolved" as Status
-  }
-];
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
-  const [issues, setIssues] = useState(mockIssues);
+  const [issues, setIssues] = useState<any[]>([]);
+  const issuesRef = useRef<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<Set<string>>(new Set());
   const [dashboardData, setDashboardData] = useState({
     residents: [],
     payments: [],
+    properties: [],
     loading: true
   });
   const { userProfile, isGuest } = useAuth();
+  const { toast } = useToast();
 
   const isOwner = userProfile?.role === 'owner' || isGuest;
 
@@ -67,12 +36,17 @@ const Dashboard = () => {
     try {
       setDashboardData(prev => ({ ...prev, loading: true }));
       
-      // Fetch data from backend API
-      const data = await dashboardAPI.getDashboardData();
+      // Fetch all data from backend API in parallel
+      const [dashboardDataResult, propertiesResult, paymentsResult] = await Promise.all([
+        dashboardAPI.getDashboardData().catch(() => ({ residents: [], payments: [], issues: [] })),
+        propertyAPI.getAll().catch(() => ({ properties: [] })),
+        paymentAPI.getAll().catch(() => ({ payments: [] }))
+      ]);
       
       setDashboardData({
-        residents: data.residents || [],
-        payments: data.payments || [],
+        residents: dashboardDataResult.residents || [],
+        payments: paymentsResult.payments || dashboardDataResult.payments || [],
+        properties: propertiesResult.properties || [],
         loading: false
       });
     } catch (error) {
@@ -81,18 +55,13 @@ const Dashboard = () => {
     }
   };
 
-  // Fetch real issues from Backend API
-  useEffect(() => {
-    fetchIssues();
-    fetchDashboardData();
-  }, []);
-
-  const fetchIssues = async () => {
+  // Memoize fetchIssues to prevent recreation on every render
+  const fetchIssues = useCallback(async () => {
     try {
       setLoading(true);
       const response = await issueAPI.getAll();
       
-      if (response && response.issues && response.issues.length > 0) {
+      if (response && response.issues) {
         // Transform backend data to match our interface
         const transformedIssues = response.issues.map((issue: any) => ({
           id: issue.id,
@@ -106,31 +75,72 @@ const Dashboard = () => {
           status: issue.status || 'pending'
         }));
         setIssues(transformedIssues);
+        issuesRef.current = transformedIssues;
       } else {
-        // Fall back to mock data if no issues returned
-        setIssues(mockIssues);
+        setIssues([]);
+        issuesRef.current = [];
       }
     } catch (error) {
       console.error('Error fetching issues:', error);
-      // Fall back to mock data if there's an error
-      setIssues(mockIssues);
+      setIssues([]);
+      issuesRef.current = [];
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const updateIssueStatus = async (issueId: string, newStatus: Status) => {
+  // Fetch real issues from Backend API
+  useEffect(() => {
+    fetchIssues();
+    fetchDashboardData();
+  }, [fetchIssues]);
+
+  // Optimistic update with rollback on error
+  const updateIssueStatus = useCallback(async (issueId: string, newStatus: Status) => {
+    // Get original issue from ref for rollback
+    const originalIssue = issuesRef.current.find(issue => issue.id === issueId);
+    if (!originalIssue) return;
+
+    // Optimistic update - update UI immediately
+    setUpdatingStatus(prev => new Set(prev).add(issueId));
+    setIssues(prev => {
+      const updated = prev.map(issue => 
+        issue.id === issueId ? { ...issue, status: newStatus } : issue
+      );
+      issuesRef.current = updated; // Keep ref in sync
+      return updated;
+    });
+
     try {
       await issueAPI.updateStatus(issueId, newStatus);
       
-      // Update local state
-      setIssues(prev => prev.map(issue => 
-        issue.id === issueId ? { ...issue, status: newStatus } : issue
-      ));
+      toast({
+        title: "Status Updated",
+        description: `Issue status changed to ${newStatus.replace("-", " ")}.`,
+      });
     } catch (error) {
+      // Rollback on error - restore original issue
+      setIssues(prev => {
+        const rolledBack = prev.map(issue => 
+          issue.id === issueId ? originalIssue : issue
+        );
+        issuesRef.current = rolledBack; // Keep ref in sync
+        return rolledBack;
+      });
       console.error('Error updating issue status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update issue status. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingStatus(prev => {
+        const next = new Set(prev);
+        next.delete(issueId);
+        return next;
+      });
     }
-  };
+  }, [toast]);
 
   // Function to refresh dashboard data when a new property is added
   const handlePropertyAdded = () => {
@@ -139,10 +149,10 @@ const Dashboard = () => {
 
   // Calculate dashboard statistics from real data
   const dashboardStats = useMemo(() => {
-    const { residents, payments } = dashboardData;
+    const { residents, payments, properties } = dashboardData;
     
-    // Calculate total properties (assume each resident has a unit, or use a default)
-    const totalProperties = residents.length || 12; // fallback to 12 if no data
+    // Calculate total properties from backend
+    const totalProperties = properties.length || 0;
     
     // Calculate occupied units (active residents)
     const occupiedUnits = residents.filter((r: any) => r.status === 'active').length;
@@ -168,32 +178,36 @@ const Dashboard = () => {
     };
   }, [dashboardData]);
 
-  const filteredIssues = issues.filter(issue => {
-    if (activeTab === "all") return true;
-    if (activeTab === "pending") return issue.status === "pending";
-    if (activeTab === "in-progress") return issue.status === "in-progress";
-    if (activeTab === "resolved") return issue.status === "resolved";
-    return true;
-  });
+  // Memoize filtered issues to prevent unnecessary recalculations
+  const filteredIssues = useMemo(() => {
+    return issues.filter(issue => {
+      if (activeTab === "all") return true;
+      if (activeTab === "pending") return issue.status === "pending";
+      if (activeTab === "in-progress") return issue.status === "in-progress";
+      if (activeTab === "resolved") return issue.status === "resolved";
+      return true;
+    });
+  }, [issues, activeTab]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <Header />
       
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground mb-2">
+      <main className="max-w-7xl mx-auto px-4 py-6 space-y-8">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
             {isOwner ? 'Owner Dashboard' : 'Resident Dashboard'}
           </h1>
-          <p className="text-muted-foreground mb-6">
+          <p className="text-muted-foreground text-lg">
             {isOwner 
               ? 'Manage your rental properties and tenant issues' 
               : 'View your rental information and submit requests'
             }
           </p>
+        </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl p-6 border border-blue-200 dark:border-blue-800 transition-all hover:shadow-lg">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl p-6 border border-blue-200 dark:border-blue-800 transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center shadow-lg">
                   <Home className="w-6 h-6 text-white" />
@@ -207,7 +221,7 @@ const Dashboard = () => {
               </div>
             </div>
             
-            <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl p-6 border border-green-200 dark:border-green-800 transition-all hover:shadow-lg">
+            <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl p-6 border border-green-200 dark:border-green-800 transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center shadow-lg">
                   <Users className="w-6 h-6 text-white" />
@@ -221,7 +235,7 @@ const Dashboard = () => {
               </div>
             </div>
             
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-xl p-6 border border-purple-200 dark:border-purple-800 transition-all hover:shadow-lg">
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-xl p-6 border border-purple-200 dark:border-purple-800 transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-purple-500 rounded-xl flex items-center justify-center shadow-lg">
                   <TrendingUp className="w-6 h-6 text-white" />
@@ -235,7 +249,7 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl p-6 border border-orange-200 dark:border-orange-800 transition-all hover:shadow-lg">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl p-6 border border-orange-200 dark:border-orange-800 transition-all duration-300 hover:shadow-lg hover:scale-[1.02]">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg">
                   <Activity className="w-6 h-6 text-white" />
@@ -249,9 +263,8 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
-        </div>
 
-        <StatsCards issues={issues} loading={loading} />
+        <StatsCards issues={issues} loading={loading || updatingStatus.size > 0} />
 
         {isOwner && (
           <Button 
@@ -264,34 +277,52 @@ const Dashboard = () => {
           </Button>
         )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
-            <TabsTrigger value="all">All Tasks</TabsTrigger>
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-            <TabsTrigger value="in-progress">In Progress</TabsTrigger>
-            <TabsTrigger value="resolved">Completed</TabsTrigger>
-          </TabsList>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Issues & Tasks</h2>
+            <span className="text-sm text-muted-foreground">
+              {filteredIssues.length} {filteredIssues.length === 1 ? 'issue' : 'issues'}
+            </span>
+          </div>
+          
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="all">All Tasks</TabsTrigger>
+              <TabsTrigger value="pending">Pending</TabsTrigger>
+              <TabsTrigger value="in-progress">In Progress</TabsTrigger>
+              <TabsTrigger value="resolved">Completed</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value={activeTab} className="space-y-4">
+          <TabsContent value={activeTab} className="space-y-4 animate-in fade-in-50 duration-300">
             {loading ? (
-              <div className="text-center py-8">
+              <div className="text-center py-12 border rounded-lg bg-muted/30">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-muted-foreground" />
                 <div className="text-muted-foreground">Loading issues...</div>
               </div>
             ) : filteredIssues.length === 0 ? (
-              <div className="text-center py-8">
+              <div className="text-center py-12 border rounded-lg bg-muted/30">
                 <div className="text-muted-foreground">No issues found.</div>
               </div>
             ) : (
-              filteredIssues.map((issue) => (
-                <IssueCard 
-                  key={issue.id} 
-                  issue={issue} 
-                  onStatusChange={isOwner ? updateIssueStatus : undefined}
-                />
-              ))
+              <div className="space-y-4">
+                {filteredIssues.map((issue, index) => (
+                  <div
+                    key={issue.id}
+                    className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300"
+                    style={{ animationDelay: `${index * 50}ms` }}
+                  >
+                    <IssueCard 
+                      issue={issue} 
+                      onStatusChange={isOwner ? updateIssueStatus : undefined}
+                      isUpdating={updatingStatus.has(issue.id)}
+                    />
+                  </div>
+                ))}
+              </div>
             )}
           </TabsContent>
-        </Tabs>
+          </Tabs>
+        </div>
       </main>
 
       <BottomNavigation />

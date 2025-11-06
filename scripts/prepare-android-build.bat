@@ -29,4 +29,4 @@ echo 🔄 Updating Capacitor Android...
 call npx cap update android
 
 echo ✅ Android build preparation complete!
-echo You can now run: cd android ^&^& gradlew.bat assembleDebug
+echo You can now run: cd android ^&^& gradlew.bat assembleRelease
