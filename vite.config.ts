@@ -8,6 +8,18 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8081,
+    // Security: Restrict file system access to prevent directory traversal
+    fs: {
+      // Deny access to files outside of the project root
+      deny: ['**/node_modules/**', '**/.git/**', '**/.env*'],
+      // Strict mode: only allow access to files within the project
+      strict: true,
+    },
+    // Security: Only allow requests from allowed origins in development
+    cors: {
+      origin: mode === 'development' ? ['http://localhost:8081', 'http://127.0.0.1:8081'] : true,
+      credentials: true,
+    },
   },
   plugins: [
     react(),
