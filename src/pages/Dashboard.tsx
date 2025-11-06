@@ -142,7 +142,12 @@ const Dashboard = () => {
     }
   }, [toast]);
 
-  // Calculate dashboard statistics from real backend data
+  // Function to refresh dashboard data when a new property is added
+  const handlePropertyAdded = () => {
+    fetchDashboardData();
+  };
+
+  // Calculate dashboard statistics from real data
   const dashboardStats = useMemo(() => {
     const { residents, payments, properties } = dashboardData;
     
@@ -325,7 +330,7 @@ const Dashboard = () => {
         <AddPropertyModal 
           isOpen={isPropertyModalOpen} 
           onClose={() => setIsPropertyModalOpen(false)}
-          onPropertyAdded={fetchDashboardData}
+          onPropertyAdded={handlePropertyAdded}
         />
       )}
     </div>

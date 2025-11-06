@@ -33,16 +33,30 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
     setIsLoading(true);
     
     try {
-      // Send data to backend API
-      await propertyAPI.create({
+      // Validate required fields
+      if (!formData.address || !formData.unit || !formData.propertyType || !formData.bedrooms || !formData.bathrooms || !formData.rent) {
+        toast({
+          title: "Validation Error",
+          description: "Please fill in all required fields.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      // Prepare data for API call
+      const propertyData = {
         address: formData.address,
-        unit: formData.unit || undefined,
+        unit: formData.unit,
         propertyType: formData.propertyType,
-        bedrooms: parseInt(formData.bedrooms) || 1,
-        bathrooms: parseFloat(formData.bathrooms) || 1,
-        rent: parseFloat(formData.rent) || 0,
-        status: "available"
-      });
+        bedrooms: parseInt(formData.bedrooms),
+        bathrooms: parseFloat(formData.bathrooms),
+        rent: parseFloat(formData.rent),
+        status: "active"
+      };
+
+      // Call the API to create the property
+      await propertyAPI.create(propertyData);
       
       toast({
         title: "Property Added",
@@ -60,17 +74,17 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
         description: ""
       });
       
-      // Refresh properties list if callback provided
+      // Refresh the properties list
       if (onPropertyAdded) {
         onPropertyAdded();
       }
       
       onClose();
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error adding property:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to add property. Please try again.",
+        description: "Failed to add property. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -190,7 +204,7 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
             <Button type="submit" className="flex-1" disabled={isLoading}>
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Adding...
                 </>
               ) : (
