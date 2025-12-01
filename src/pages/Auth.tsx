@@ -6,8 +6,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { OTPVerificationDialog } from '@/components/OTPVerificationDialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Home, UserPlus, LogIn, Users } from 'lucide-react';
+import { ConfirmationResult } from 'firebase/auth';
 
 const Auth = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -18,6 +20,7 @@ const Auth = () => {
     fullName: '',
     email: '',
     password: '',
+    phoneNumber: '',
     role: 'resident' as 'owner' | 'resident',
     referralCode: '',
   });
@@ -26,7 +29,13 @@ const Auth = () => {
     password: '',
   });
   
-  const { signUp, signIn, signInAsGuest, resetPassword } = useAuth();
+  // OTP Verification state
+  const [showOTPDialog, setShowOTPDialog] = useState(false);
+  const [otpPhoneNumber, setOtpPhoneNumber] = useState('');
+  const [otpConfirmationResult, setOtpConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [isSignupOTP, setIsSignupOTP] = useState(false); // Track if OTP is for signup
+  
+  const { signUp, signIn, signInAsGuest, resetPassword, sendOTP, verifyOTP, linkPhoneNumber, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -35,12 +44,58 @@ const Auth = () => {
     setIsLoading(true);
     
     try {
-      await signUp(signUpData.email, signUpData.password, signUpData.fullName, signUpData.role, signUpData.referralCode);
-      toast({
-        title: "Account created!",
-        description: `Welcome to CoHub! Your ${signUpData.role} account has been created successfully.`,
-      });
-      navigate('/');
+      // Validate phone number if provided
+      let formattedPhone: string | undefined;
+      if (signUpData.phoneNumber.trim()) {
+        formattedPhone = signUpData.phoneNumber.startsWith('+') 
+          ? signUpData.phoneNumber 
+          : `+91${signUpData.phoneNumber.replace(/\D/g, '')}`;
+        
+        // Basic phone validation
+        if (formattedPhone.length < 10) {
+          throw new Error('Please enter a valid phone number with country code');
+        }
+      }
+      
+      // Create account
+      await signUp(
+        signUpData.email, 
+        signUpData.password, 
+        signUpData.fullName, 
+        signUpData.role, 
+        signUpData.referralCode,
+        formattedPhone
+      );
+      
+      // If phone number provided, send OTP for verification
+      if (formattedPhone) {
+        try {
+          const confirmationResult = await linkPhoneNumber(formattedPhone);
+          setOtpPhoneNumber(formattedPhone);
+          setOtpConfirmationResult(confirmationResult);
+          setIsSignupOTP(true);
+          setShowOTPDialog(true);
+          toast({
+            title: "Account created!",
+            description: "Please verify your phone number with the OTP sent to your phone.",
+          });
+        } catch (otpError: any) {
+          // If OTP send fails, still allow account creation
+          toast({
+            title: "Account created!",
+            description: `Welcome to CoHub! Your ${signUpData.role} account has been created. Phone verification failed: ${otpError.message}`,
+            variant: "default",
+          });
+          navigate('/');
+        }
+      } else {
+        // No phone number, redirect directly
+        toast({
+          title: "Account created!",
+          description: `Welcome to CoHub! Your ${signUpData.role} account has been created successfully.`,
+        });
+        navigate('/');
+      }
     } catch (error: any) {
       toast({
         title: "Sign up failed",
@@ -57,12 +112,42 @@ const Auth = () => {
     setIsLoading(true);
     
     try {
-      await signIn(signInData.email, signInData.password);
-      toast({
-        title: "Welcome back!",
-        description: "You have been signed in successfully.",
-      });
-      navigate('/');
+      // Step 1: Sign in with email and password
+      const userProfile = await signIn(signInData.email, signInData.password);
+      
+      // Step 2: Check if user has phone number - OTP verification is MANDATORY
+      if (!userProfile?.phoneNumber) {
+        // No phone number - log out and show error
+        await logout();
+        toast({
+          title: "Phone number required",
+          description: "Your account must have a verified phone number. Please contact support or sign up with a phone number.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+      
+      // Step 3: Send OTP to phone number - MANDATORY for sign-in
+      try {
+        const confirmationResult = await linkPhoneNumber(userProfile.phoneNumber);
+        setOtpPhoneNumber(userProfile.phoneNumber);
+        setOtpConfirmationResult(confirmationResult);
+        setIsSignupOTP(false); // This is for login, not signup
+        setShowOTPDialog(true);
+        toast({
+          title: "Step 1 Complete!",
+          description: "Please verify your phone number with the OTP sent to your phone to complete sign-in.",
+        });
+      } catch (otpError: any) {
+        // If OTP send fails, log out the user
+        await logout();
+        toast({
+          title: "OTP Send Failed",
+          description: `Could not send OTP: ${otpError.message}. Please try again.`,
+          variant: "destructive",
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Sign in failed",
@@ -71,6 +156,45 @@ const Auth = () => {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleOTPVerify = async (otp: string) => {
+    if (!otpConfirmationResult) {
+      throw new Error('Session expired. Please try again.');
+    }
+    try {
+      await verifyOTP(otpConfirmationResult, otp);
+      toast({
+        title: "Sign-in Complete!",
+        description: "Your phone number has been verified. Welcome back!",
+      });
+      setShowOTPDialog(false);
+      setOtpConfirmationResult(null);
+      setOtpPhoneNumber('');
+      setIsSignupOTP(false);
+      
+      // Redirect to dashboard after successful OTP verification
+      navigate('/');
+    } catch (error: any) {
+      // Re-throw error to show in dialog
+      throw error;
+    }
+  };
+
+  const handleOTPResend = async () => {
+    if (!otpPhoneNumber) {
+      throw new Error('Phone number not found.');
+    }
+    try {
+      const confirmationResult = await sendOTP(otpPhoneNumber);
+      setOtpConfirmationResult(confirmationResult);
+      toast({
+        title: "OTP Resent!",
+        description: "A new verification code has been sent to your phone.",
+      });
+    } catch (error: any) {
+      throw error;
     }
   };
 
@@ -196,6 +320,9 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/5 flex items-center justify-center p-4">
+      {/* reCAPTCHA container for Firebase Phone Auth */}
+      <div id="recaptcha-container" className="hidden"></div>
+      
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-2">
@@ -322,6 +449,20 @@ const Auth = () => {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="signup-phone">Phone Number (Required for verification)</Label>
+                    <Input
+                      id="signup-phone"
+                      type="tel"
+                      placeholder="+91XXXXXXXXXX (with country code)"
+                      value={signUpData.phoneNumber}
+                      onChange={(e) => setSignUpData({ ...signUpData, phoneNumber: e.target.value })}
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      You'll receive an OTP to verify this number
+                    </p>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="signup-role">Account Type</Label>
                     <select
                       id="signup-role"
@@ -389,6 +530,37 @@ const Auth = () => {
           </CardContent>
         </Card>
       </div>
+      
+      {/* OTP Verification Dialog - MANDATORY for Sign-in */}
+      <OTPVerificationDialog
+        open={showOTPDialog}
+        phoneNumber={otpPhoneNumber}
+        confirmationResult={otpConfirmationResult}
+        onVerify={handleOTPVerify}
+        onResend={handleOTPResend}
+        onClose={async () => {
+          // If OTP dialog is closed during sign-in (not signup), log out the user
+          if (!isSignupOTP) {
+            try {
+              await logout();
+              toast({
+                title: "Sign-in cancelled",
+                description: "OTP verification is required. Please sign in again and verify your phone number.",
+                variant: "default",
+              });
+            } catch (error) {
+              // Ignore logout errors
+            }
+          } else {
+            // For signup, allow closing (user can verify later)
+            navigate('/');
+          }
+          setShowOTPDialog(false);
+          setOtpConfirmationResult(null);
+          setOtpPhoneNumber('');
+          setIsSignupOTP(false);
+        }}
+      />
     </div>
   );
 };

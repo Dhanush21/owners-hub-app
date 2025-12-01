@@ -7,7 +7,8 @@ import Header from "@/components/Header";
 import BottomNavigation from "@/components/BottomNavigation";
 import AddResidentModal from "@/components/AddResidentModal";
 import { useAuth } from "@/context/AuthContext";
-import { userAPI } from "@/services/api";
+import { db } from "@/integrations/firebase/client";
+import { collection, query, where, getDocs } from "firebase/firestore";
 
 interface Resident {
   id: string;
@@ -31,22 +32,31 @@ const Residents = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchResidents = async () => {
-      if (!user) return;
+      if (!user || user.isAnonymous) {
+        setLoading(false);
+        return;
+      }
       
       try {
         setLoading(true);
-        const response = await userAPI.getAll({ role: 'resident' });
-        const docs = response.users || [];
         
-        const fetchedResidents: Resident[] = docs.map((data: any) => {
+        // Fetch residents from Firestore
+        const residentsQuery = query(
+          collection(db, "residents"),
+          where("ownerId", "==", user.uid)
+        );
+        const residentsSnapshot = await getDocs(residentsQuery);
+        
+        const fetchedResidents: Resident[] = residentsSnapshot.docs.map((doc) => {
+          const data = doc.data();
           return {
-            id: data.id,
-            name: data.fullName || 'Unknown Resident',
-            fullName: data.fullName || 'Unknown Resident',
+            id: doc.id,
+            name: data.fullName || data.name || 'Unknown Resident',
+            fullName: data.fullName || data.name || 'Unknown Resident',
             email: data.email || '',
             phone: data.phone || '',
             unit: data.unit || `Unit ${Math.floor(Math.random() * 100) + 1}${String.fromCharCode(65 + Math.floor(Math.random() * 4))}`,
-            leaseEnd: data.leaseEnd || new Date(Date.now() + Math.random() * 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+            leaseEnd: data.leaseEnd ? new Date(data.leaseEnd).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : new Date(Date.now() + Math.random() * 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
             status: data.status || "active",
             rentPaid: data.rentPaid !== false,
             role: data.role || 'resident',
@@ -62,22 +72,7 @@ const Residents = () => {
         setResidents(sortedResidents);
       } catch (error) {
         console.error('Error fetching residents:', error);
-        // Fallback to showing current user if they are a resident
-        if (userProfile?.role === 'resident') {
-          setResidents([{
-            id: user.uid,
-            name: userProfile.fullName,
-            fullName: userProfile.fullName,
-            email: userProfile.email,
-            phone: '',
-            unit: `Unit ${Math.floor(Math.random() * 100) + 1}${String.fromCharCode(65 + Math.floor(Math.random() * 4))}`,
-            leaseEnd: new Date(Date.now() + Math.random() * 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-            status: "active",
-            rentPaid: true,
-            role: 'resident',
-            createdAt: userProfile.createdAt
-          }]);
-        }
+        setResidents([]);
       } finally {
         setLoading(false);
       }

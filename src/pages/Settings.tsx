@@ -59,7 +59,7 @@ const Settings = () => {
       icon: User,
       title: "Profile",
       description: "Update your personal information",
-      onClick: () => {}
+      onClick: () => navigate('/profile')
     },
     {
       icon: UserPlus,
@@ -71,7 +71,7 @@ const Settings = () => {
       icon: Bell,
       title: "Notifications",
       description: "Configure your notification preferences",
-      onClick: () => {}
+      onClick: () => navigate('/notifications')
     },
     {
       icon: Shield,

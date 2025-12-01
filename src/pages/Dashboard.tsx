@@ -10,6 +10,8 @@ import AddPropertyModal from "@/components/AddPropertyModal";
 import { useAuth } from "@/context/AuthContext";
 import { dashboardAPI, issueAPI, propertyAPI, paymentAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { db } from "@/integrations/firebase/client";
+import { collection, query, where, getDocs } from "firebase/firestore";
 
 type Status = "pending" | "in-progress" | "resolved";
 
@@ -26,27 +28,61 @@ const Dashboard = () => {
     properties: [],
     loading: true
   });
-  const { userProfile, isGuest } = useAuth();
+  const { user, userProfile, isGuest } = useAuth();
   const { toast } = useToast();
 
   const isOwner = userProfile?.role === 'owner' || isGuest;
 
-  // Fetch dashboard data from Backend API
+  // Fetch dashboard data from Firestore
   const fetchDashboardData = async () => {
     try {
       setDashboardData(prev => ({ ...prev, loading: true }));
       
-      // Fetch all data from backend API in parallel
-      const [dashboardDataResult, propertiesResult, paymentsResult] = await Promise.all([
-        dashboardAPI.getDashboardData().catch(() => ({ residents: [], payments: [], issues: [] })),
-        propertyAPI.getAll().catch(() => ({ properties: [] })),
-        paymentAPI.getAll().catch(() => ({ payments: [] }))
-      ]);
+      if (!user || user.isAnonymous) {
+        setDashboardData({
+          residents: [],
+          payments: [],
+          properties: [],
+          loading: false
+        });
+        return;
+      }
+
+      // Fetch properties from Firestore
+      const propertiesQuery = query(
+        collection(db, "properties"),
+        where("ownerId", "==", user.uid)
+      );
+      const propertiesSnapshot = await getDocs(propertiesQuery);
+      const properties = propertiesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      // Fetch residents from Firestore
+      const residentsQuery = query(
+        collection(db, "residents"),
+        where("ownerId", "==", user.uid)
+      );
+      const residentsSnapshot = await getDocs(residentsQuery);
+      const residents = residentsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      // Try to fetch payments from backend API (fallback to empty array)
+      let payments: any[] = [];
+      try {
+        const paymentsResult = await paymentAPI.getAll();
+        payments = paymentsResult.payments || [];
+      } catch (error) {
+        console.warn('Could not fetch payments from API:', error);
+      }
       
       setDashboardData({
-        residents: dashboardDataResult.residents || [],
-        payments: paymentsResult.payments || dashboardDataResult.payments || [],
-        properties: propertiesResult.properties || [],
+        residents: residents || [],
+        payments: payments || [],
+        properties: properties || [],
         loading: false
       });
     } catch (error) {

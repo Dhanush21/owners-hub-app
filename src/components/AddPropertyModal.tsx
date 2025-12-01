@@ -6,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { propertyAPI } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/integrations/firebase/client";
+import { collection, addDoc } from "firebase/firestore";
 import { Loader2 } from "lucide-react";
 
 interface AddPropertyModalProps {
@@ -17,6 +19,7 @@ interface AddPropertyModalProps {
 
 const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModalProps) => {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     address: "",
@@ -30,19 +33,44 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!user || user.isAnonymous) {
+      toast({
+        title: "Error",
+        description: "Please sign in to add properties.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!formData.propertyType) {
+      toast({
+        title: "Error",
+        description: "Please select a property type.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
     
     try {
-      // Send data to backend API
-      await propertyAPI.create({
+      // Save to Firestore
+      const propertyData = {
         address: formData.address,
-        unit: formData.unit || undefined,
+        unit: formData.unit || null,
         propertyType: formData.propertyType,
         bedrooms: parseInt(formData.bedrooms) || 1,
         bathrooms: parseFloat(formData.bathrooms) || 1,
         rent: parseFloat(formData.rent) || 0,
-        status: "available"
-      });
+        status: "available",
+        description: formData.description || "",
+        ownerId: user.uid,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await addDoc(collection(db, "properties"), propertyData);
       
       toast({
         title: "Property Added",
