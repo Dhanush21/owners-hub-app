@@ -6,21 +6,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/context/AuthContext";
-import { db } from "@/integrations/firebase/client";
-import { collection, addDoc } from "firebase/firestore";
-import { Loader2 } from "lucide-react";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onPropertyAdded?: () => void; // Callback to refresh properties list
 }
 
-const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModalProps) => {
+const AddPropertyModal = ({ isOpen, onClose }: AddPropertyModalProps) => {
   const { toast } = useToast();
-  const { user } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     address: "",
     unit: "",
@@ -31,79 +24,29 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
     description: ""
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!user || user.isAnonymous) {
-      toast({
-        title: "Error",
-        description: "Please sign in to add properties.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!formData.propertyType) {
-      toast({
-        title: "Error",
-        description: "Please select a property type.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLoading(true);
+    // Here you would typically send the data to your backend
+    console.log("New property:", formData);
     
-    try {
-      // Save to Firestore
-      const propertyData = {
-        address: formData.address,
-        unit: formData.unit || null,
-        propertyType: formData.propertyType,
-        bedrooms: parseInt(formData.bedrooms) || 1,
-        bathrooms: parseFloat(formData.bathrooms) || 1,
-        rent: parseFloat(formData.rent) || 0,
-        status: "available",
-        description: formData.description || "",
-        ownerId: user.uid,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      await addDoc(collection(db, "properties"), propertyData);
-      
-      toast({
-        title: "Property Added",
-        description: "New property has been successfully added to your portfolio.",
-      });
-      
-      // Reset form
-      setFormData({
-        address: "",
-        unit: "",
-        bedrooms: "",
-        bathrooms: "",
-        rent: "",
-        propertyType: "",
-        description: ""
-      });
-      
-      // Refresh properties list if callback provided
-      if (onPropertyAdded) {
-        onPropertyAdded();
-      }
-      
-      onClose();
-    } catch (error: any) {
-      console.error("Error adding property:", error);
-      toast({
-        title: "Error",
-        description: error.message || "Failed to add property. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    toast({
+      title: "Property Added",
+      description: "New property has been successfully added to your portfolio.",
+    });
+    
+    // Reset form
+    setFormData({
+      address: "",
+      unit: "",
+      bedrooms: "",
+      bathrooms: "",
+      rent: "",
+      propertyType: "",
+      description: ""
+    });
+    
+    onClose();
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -212,18 +155,11 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
           </div>
 
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={onClose} className="flex-1" disabled={isLoading}>
+            <Button type="button" variant="outline" onClick={onClose} className="flex-1">
               Cancel
             </Button>
-            <Button type="submit" className="flex-1" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Adding...
-                </>
-              ) : (
-                "Add Property"
-              )}
+            <Button type="submit" className="flex-1">
+              Add Property
             </Button>
           </div>
         </form>

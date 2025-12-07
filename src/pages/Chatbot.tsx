@@ -42,7 +42,7 @@ const Chatbot = () => {
   const navigate = useNavigate();
 
   // Gemini API configuration
-  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "your-api-key-here";
+  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
   const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
   // Chat persistence functions
@@ -391,10 +391,17 @@ Q: ${question}`
         ]
       };
 
-      const response = await fetch(GEMINI_API_URL, {
+      // Validate API key
+      if (!GEMINI_API_KEY || GEMINI_API_KEY === "" || GEMINI_API_KEY === "your-api-key-here") {
+        throw new Error("Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.");
+      }
+
+      // Use query parameter format for API key (more reliable)
+      const apiUrl = `${GEMINI_API_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-          'x-goog-api-key': GEMINI_API_KEY,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
@@ -404,10 +411,33 @@ Q: ${question}`
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`Gemini API responded with status: ${response.status}`);
+        const errorText = await response.text();
+        let errorMessage = `Gemini API responded with status: ${response.status}`;
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData.error?.message) {
+            errorMessage += ` - ${errorData.error.message}`;
+          } else if (errorData.error) {
+            errorMessage += ` - ${JSON.stringify(errorData.error)}`;
+          }
+        } catch {
+          if (errorText) {
+            errorMessage += ` - ${errorText.substring(0, 200)}`;
+          }
+        }
+        
+        console.error('Gemini API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
+
       
       // Handle tool calling if Gemini requests it
       if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
@@ -470,10 +500,10 @@ ${JSON.stringify(toolResults)}`
             ]
           };
           
-          const finalResponse = await fetch(GEMINI_API_URL, {
+          const finalApiUrl = `${GEMINI_API_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+          const finalResponse = await fetch(finalApiUrl, {
             method: 'POST',
             headers: {
-              'x-goog-api-key': GEMINI_API_KEY,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(finalRequestBody),
@@ -497,6 +527,10 @@ ${JSON.stringify(toolResults)}`
             }
             
             return response;
+          } else {
+            const errorText = await finalResponse.text();
+            console.error('Final response error:', finalResponse.status, errorText);
+            throw new Error(`Failed to get final response: ${finalResponse.status}`);
           }
         }
       }
@@ -670,9 +704,25 @@ const sendMessage = async () => {
     }, 300);
   } catch (error) {
     console.error("Error sending message:", error);
+    let errorContent = "Sorry, I hit an unexpected error. Please try again.";
+    
+    if (error instanceof Error) {
+      if (error.message.includes("API key is not configured")) {
+        errorContent = "⚠️ Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.";
+      } else if (error.message.includes("403")) {
+        errorContent = "⚠️ Authentication failed. Please check your Gemini API key in the .env file. The API key may be invalid or expired.";
+      } else if (error.message.includes("401")) {
+        errorContent = "⚠️ Invalid API key. Please verify your VITE_GEMINI_API_KEY in the .env file.";
+      } else if (error.message.includes("429")) {
+        errorContent = "⚠️ Rate limit exceeded. Please try again in a moment.";
+      } else if (error.message) {
+        errorContent = `⚠️ ${error.message}`;
+      }
+    }
+    
     const errorMessage: Message = {
       id: (Date.now() + 1).toString(),
-      content: "Sorry, I hit an unexpected error. Please try again.",
+      content: errorContent,
       sender: "bot",
       timestamp: new Date(),
     };

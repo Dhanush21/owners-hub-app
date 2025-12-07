@@ -26,12 +26,12 @@ platform :android do
     
     # Build Android APK
     gradle(
-      task: "assembleRelease",
+      task: "assembleDebug",
       project_dir: "android"
     )
     
     # Find the APK file
-    apk_path = Dir.glob("android/app/build/outputs/apk/release/*.apk").first
+    apk_path = Dir.glob("android/app/build/outputs/apk/debug/*.apk").first
     
     if apk_path.nil?
       UI.user_error!("APK file not found. Build may have failed.")
