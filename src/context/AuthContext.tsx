@@ -60,16 +60,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Add error boundary for auth state
   const [authError, setAuthError] = useState<string | null>(null);
-  
-  // Store reCAPTCHA verifier for web
+
+  // Store reCAPTCHA verifier for web OTP
   const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
 
   const isGuest = user?.isAnonymous || false;
-  
+
   // Initialize reCAPTCHA container for web platform
   useEffect(() => {
     if (Capacitor.getPlatform() === 'web' && typeof window !== 'undefined') {
-      // Ensure recaptcha container exists
       if (!document.getElementById('recaptcha-container')) {
         const container = document.createElement('div');
         container.id = 'recaptcha-container';
@@ -82,12 +81,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (recaptchaVerifier) {
         try {
           recaptchaVerifier.clear();
-        } catch (e) {
-          // Ignore cleanup errors
+        } catch {
+          // ignore cleanup errors
         }
       }
     };
-  }, []);
+  }, [recaptchaVerifier]);
 
   useEffect(() => {
     try {
@@ -185,8 +184,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     // Format phone number (ensure it starts with +)
     const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
-    
-    // Ensure recaptcha container exists
+
+    // Ensure recaptcha container exists for web
     if (Capacitor.getPlatform() === 'web' && typeof window !== 'undefined') {
       if (!document.getElementById('recaptcha-container')) {
         const container = document.createElement('div');
@@ -195,12 +194,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         document.body.appendChild(container);
       }
     }
-    
-    // For web, use reCAPTCHA verifier
+
+    // For web, use an invisible reCAPTCHA verifier
     if (Capacitor.getPlatform() === 'web') {
       let verifier = recaptchaVerifier;
-      
-      // Initialize verifier if not already done
+
       if (!verifier) {
         verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
           size: 'invisible',
@@ -209,58 +207,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.warn('reCAPTCHA expired');
           }
         });
-        
-        try {
-          await verifier.render();
-          setRecaptchaVerifier(verifier);
-        } catch (error: any) {
-          // If container doesn't exist or already rendered, clear and retry
-          if (error.message?.includes('already rendered') || error.message?.includes('container')) {
-            verifier.clear();
-            verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-              size: 'invisible',
-              callback: () => {},
-              'expired-callback': () => {
-                console.warn('reCAPTCHA expired');
-              }
-            });
-            await verifier.render();
-            setRecaptchaVerifier(verifier);
-          } else {
-            throw error;
-          }
-        }
-      }
-      
-      try {
-        const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-        return confirmationResult;
-      } catch (error: any) {
-        // Handle rate limit errors
-        if (error.code === 'auth/too-many-requests') {
-          throw new Error('Too many requests. Please try again later.');
-        } else if (error.code === 'auth/invalid-phone-number') {
-          throw new Error('Invalid phone number. Please check and try again.');
-        } else if (error.code === 'auth/quota-exceeded') {
-          throw new Error('SMS quota exceeded. Please try again later.');
-        }
-        throw error;
-      }
-    } else {
-      // For mobile (Android/iOS), Firebase handles SMS automatically
-      const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-      });
-      
-      try {
+
         await verifier.render();
+        setRecaptchaVerifier(verifier);
+      }
+
+      try {
         const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
         return confirmationResult;
       } catch (error: any) {
-        // Clean up verifier on error
-        verifier.clear();
-        
-        // Handle specific errors
         if (error.code === 'auth/too-many-requests') {
           throw new Error('Too many requests. Please try again later.');
         } else if (error.code === 'auth/invalid-phone-number') {
@@ -270,6 +225,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         throw error;
       }
+    }
+
+    // For native (Capacitor) builds, rely on platform verification (no web reCAPTCHA)
+    try {
+      const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone);
+      return confirmationResult;
+    } catch (error: any) {
+      if (error.code === 'auth/too-many-requests') {
+        throw new Error('Too many requests. Please try again later.');
+      } else if (error.code === 'auth/invalid-phone-number') {
+        throw new Error('Invalid phone number. Please check and try again.');
+      } else if (error.code === 'auth/quota-exceeded') {
+        throw new Error('SMS quota exceeded. Please try again later.');
+      }
+      throw error;
     }
   };
 

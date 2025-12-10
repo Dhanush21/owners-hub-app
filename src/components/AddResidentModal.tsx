@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { db } from "@/integrations/firebase/client";
 import { collection, addDoc } from "firebase/firestore";
 import { Loader2 } from "lucide-react";
+import { notificationHelpers } from "@/services/notificationService";
 
 interface AddResidentModalProps {
   isOpen: boolean;
@@ -75,7 +76,10 @@ const AddResidentModal = ({ isOpen, onClose, onResidentAdded }: AddResidentModal
         updatedAt: new Date().toISOString(),
       };
 
-      await addDoc(collection(db, "residents"), residentData);
+      const residentDocRef = await addDoc(collection(db, "residents"), residentData);
+      
+      // Create notification for resident added
+      await notificationHelpers.residentAdded(user.uid, formData.name, formData.unit, residentDocRef.id);
       
       toast({
         title: "Resident Added",

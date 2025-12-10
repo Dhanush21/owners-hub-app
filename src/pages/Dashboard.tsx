@@ -12,6 +12,7 @@ import { dashboardAPI, issueAPI, propertyAPI, paymentAPI } from "@/services/api"
 import { useToast } from "@/hooks/use-toast";
 import { db } from "@/integrations/firebase/client";
 import { collection, query, where, getDocs } from "firebase/firestore";
+import { notificationHelpers } from "@/services/notificationService";
 
 type Status = "pending" | "in-progress" | "resolved";
 
@@ -149,6 +150,12 @@ const Dashboard = () => {
 
     try {
       await issueAPI.updateStatus(issueId, newStatus);
+      
+      // Create notification for issue update
+      const issue = issuesRef.current.find(issue => issue.id === issueId);
+      if (issue && user && !user.isAnonymous) {
+        await notificationHelpers.issueUpdate(user.uid, issue.title, newStatus, issueId);
+      }
       
       toast({
         title: "Status Updated",

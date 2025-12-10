@@ -267,7 +267,7 @@ const Notifications = () => {
             </CardContent>
           </Card>
 
-          {/* Save Button */}
+          {/* Action Buttons */}
           <div className="flex gap-3">
             <Button
               onClick={savePreferences}
@@ -285,6 +285,12 @@ const Notifications = () => {
                   Save Preferences
                 </>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate('/notifications/list')}
+            >
+              View All Notifications
             </Button>
             <Button
               variant="outline"

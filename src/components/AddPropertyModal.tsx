@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { db } from "@/integrations/firebase/client";
 import { collection, addDoc } from "firebase/firestore";
 import { Loader2 } from "lucide-react";
+import { notificationHelpers } from "@/services/notificationService";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -70,7 +71,10 @@ const AddPropertyModal = ({ isOpen, onClose, onPropertyAdded }: AddPropertyModal
         updatedAt: new Date().toISOString(),
       };
 
-      await addDoc(collection(db, "properties"), propertyData);
+      const propertyDocRef = await addDoc(collection(db, "properties"), propertyData);
+      
+      // Create notification for property added
+      await notificationHelpers.propertyAdded(user.uid, formData.address, propertyDocRef.id);
       
       toast({
         title: "Property Added",
