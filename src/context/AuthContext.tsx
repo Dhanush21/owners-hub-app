@@ -8,13 +8,10 @@ import {
   signInAnonymously,
   sendPasswordResetEmail,
   deleteUser,
-  signInWithPhoneNumber,
-  ConfirmationResult,
-  RecaptchaVerifier
 } from 'firebase/auth';
 import { auth, db } from '@/integrations/firebase/client';
 import { doc, setDoc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { Capacitor } from '@capacitor/core';
+import { authAPI } from '@/services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -27,10 +24,10 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
   userProfile: UserProfile | null;
-  // OTP functions for two-step authentication
-  sendOTP: (phoneNumber: string) => Promise<ConfirmationResult>;
-  verifyOTP: (confirmationResult: ConfirmationResult, otp: string) => Promise<void>;
-  linkPhoneNumber: (phoneNumber: string) => Promise<ConfirmationResult>;
+  // OTP functions for two-step authentication (no CAPTCHA)
+  sendOTP: (phoneNumber: string) => Promise<{ success: boolean; message: string; otp?: string }>;
+  verifyOTP: (phoneNumber: string, otp: string) => Promise<{ verified: boolean; phoneNumber: string }>;
+  linkPhoneNumber: (phoneNumber: string) => Promise<{ success: boolean; message: string; otp?: string }>;
 }
 
 interface UserProfile {
@@ -61,32 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Add error boundary for auth state
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Store reCAPTCHA verifier for web OTP
-  const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
-
   const isGuest = user?.isAnonymous || false;
-
-  // Initialize reCAPTCHA container for web platform
-  useEffect(() => {
-    if (Capacitor.getPlatform() === 'web' && typeof window !== 'undefined') {
-      if (!document.getElementById('recaptcha-container')) {
-        const container = document.createElement('div');
-        container.id = 'recaptcha-container';
-        container.style.display = 'none';
-        document.body.appendChild(container);
-      }
-    }
-    
-    return () => {
-      if (recaptchaVerifier) {
-        try {
-          recaptchaVerifier.clear();
-        } catch {
-          // ignore cleanup errors
-        }
-      }
-    };
-  }, [recaptchaVerifier]);
 
   useEffect(() => {
     try {
@@ -180,121 +152,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Send OTP to phone number
-  const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
-    // Format phone number (ensure it starts with +)
-    const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
-
-    // Ensure recaptcha container exists for web
-    if (Capacitor.getPlatform() === 'web' && typeof window !== 'undefined') {
-      if (!document.getElementById('recaptcha-container')) {
-        const container = document.createElement('div');
-        container.id = 'recaptcha-container';
-        container.style.display = 'none';
-        document.body.appendChild(container);
-      }
-    }
-
-    // For web, use an invisible reCAPTCHA verifier
-    if (Capacitor.getPlatform() === 'web') {
-      let verifier = recaptchaVerifier;
-
-      if (!verifier) {
-        verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-          callback: () => {},
-          'expired-callback': () => {
-            console.warn('reCAPTCHA expired');
-          }
-        });
-
-        await verifier.render();
-        setRecaptchaVerifier(verifier);
-      }
-
-      try {
-        const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-        return confirmationResult;
-      } catch (error: any) {
-        if (error.code === 'auth/too-many-requests') {
-          throw new Error('Too many requests. Please try again later.');
-        } else if (error.code === 'auth/invalid-phone-number') {
-          throw new Error('Invalid phone number. Please check and try again.');
-        } else if (error.code === 'auth/quota-exceeded') {
-          throw new Error('SMS quota exceeded. Please try again later.');
-        }
-        throw error;
-      }
-    }
-
-    // For native (Capacitor) builds, rely on platform verification (no web reCAPTCHA)
+  // Send OTP to phone number (no CAPTCHA required)
+  const sendOTP = async (phoneNumber: string): Promise<{ success: boolean; message: string; otp?: string }> => {
     try {
-      const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone);
-      return confirmationResult;
+      const result = await authAPI.sendOTP(phoneNumber);
+      return result;
     } catch (error: any) {
-      if (error.code === 'auth/too-many-requests') {
-        throw new Error('Too many requests. Please try again later.');
-      } else if (error.code === 'auth/invalid-phone-number') {
-        throw new Error('Invalid phone number. Please check and try again.');
-      } else if (error.code === 'auth/quota-exceeded') {
-        throw new Error('SMS quota exceeded. Please try again later.');
-      }
-      throw error;
+      throw new Error(error.message || 'Failed to send OTP');
     }
   };
 
-  // Verify OTP code
-  const verifyOTP = async (confirmationResult: ConfirmationResult, otp: string): Promise<void> => {
+  // Verify OTP code (no CAPTCHA required)
+  const verifyOTP = async (phoneNumber: string, otp: string): Promise<{ verified: boolean; phoneNumber: string }> => {
     try {
-      const result = await confirmationResult.confirm(otp);
+      const result = await authAPI.verifyOTP(phoneNumber, otp);
+      if (!result.verified) {
+        throw new Error(result.error || 'OTP verification failed');
+      }
       
       // After successful verification, update user profile to mark phone as verified
-      if (result.user) {
-        const profileDoc = await getDoc(doc(db, 'users', result.user.uid));
+      if (user) {
+        const profileDoc = await getDoc(doc(db, 'users', user.uid));
         if (profileDoc.exists()) {
           const profileData = profileDoc.data() as UserProfile;
-          await updateDoc(doc(db, 'users', result.user.uid), {
+          await updateDoc(doc(db, 'users', user.uid), {
             phoneVerified: true,
-            phoneNumber: profileData.phoneNumber || result.user.phoneNumber || '',
+            phoneNumber: profileData.phoneNumber || phoneNumber,
           });
           
           // Update local profile state
           setUserProfile({
             ...profileData,
             phoneVerified: true,
-            phoneNumber: profileData.phoneNumber || result.user.phoneNumber || '',
+            phoneNumber: profileData.phoneNumber || phoneNumber,
           });
-        } else {
-          // If profile doesn't exist, create one with phone number
-          const newProfile: UserProfile = {
-            fullName: result.user.displayName || 'User',
-            email: result.user.email || '',
-            phoneNumber: result.user.phoneNumber || '',
-            phoneVerified: true,
-            createdAt: new Date().toISOString(),
-            role: 'resident',
-          };
-          await setDoc(doc(db, 'users', result.user.uid), newProfile);
-          setUserProfile(newProfile);
         }
       }
+      
+      return result;
     } catch (error: any) {
-      // Handle specific error codes
-      if (error.code === 'auth/invalid-verification-code') {
-        throw new Error('Invalid OTP code. Please try again.');
-      } else if (error.code === 'auth/code-expired') {
-        throw new Error('OTP code has expired. Please request a new one.');
-      } else if (error.code === 'auth/session-expired') {
-        throw new Error('Session expired. Please start the verification process again.');
-      } else if (error.code === 'auth/too-many-requests') {
-        throw new Error('Too many requests. Please try again later.');
-      }
-      throw error;
+      throw new Error(error.message || 'Failed to verify OTP');
     }
   };
 
   // Link phone number to existing account (for verification after signup/login)
-  const linkPhoneNumber = async (phoneNumber: string): Promise<ConfirmationResult> => {
+  const linkPhoneNumber = async (phoneNumber: string): Promise<{ success: boolean; message: string; otp?: string }> => {
     return await sendOTP(phoneNumber);
   };
 

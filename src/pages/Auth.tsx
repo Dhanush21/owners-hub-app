@@ -9,7 +9,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { OTPVerificationDialog } from '@/components/OTPVerificationDialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Home, UserPlus, LogIn, Users } from 'lucide-react';
-import { ConfirmationResult } from 'firebase/auth';
 
 const Auth = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -32,7 +31,6 @@ const Auth = () => {
   // OTP Verification state
   const [showOTPDialog, setShowOTPDialog] = useState(false);
   const [otpPhoneNumber, setOtpPhoneNumber] = useState('');
-  const [otpConfirmationResult, setOtpConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [isSignupOTP, setIsSignupOTP] = useState(false); // Track if OTP is for signup
   
   const { signUp, signIn, signInAsGuest, resetPassword, sendOTP, verifyOTP, linkPhoneNumber, logout } = useAuth();
@@ -70,9 +68,8 @@ const Auth = () => {
       // If phone number provided, send OTP for verification
       if (formattedPhone) {
         try {
-          const confirmationResult = await linkPhoneNumber(formattedPhone);
+          await linkPhoneNumber(formattedPhone);
           setOtpPhoneNumber(formattedPhone);
-          setOtpConfirmationResult(confirmationResult);
           setIsSignupOTP(true);
           setShowOTPDialog(true);
           toast({
@@ -130,9 +127,8 @@ const Auth = () => {
       
       // Step 3: Send OTP to phone number - MANDATORY for sign-in
       try {
-        const confirmationResult = await linkPhoneNumber(userProfile.phoneNumber);
+        await linkPhoneNumber(userProfile.phoneNumber);
         setOtpPhoneNumber(userProfile.phoneNumber);
-        setOtpConfirmationResult(confirmationResult);
         setIsSignupOTP(false); // This is for login, not signup
         setShowOTPDialog(true);
         toast({
@@ -160,17 +156,16 @@ const Auth = () => {
   };
 
   const handleOTPVerify = async (otp: string) => {
-    if (!otpConfirmationResult) {
-      throw new Error('Session expired. Please try again.');
+    if (!otpPhoneNumber) {
+      throw new Error('Phone number not found. Please start over.');
     }
     try {
-      await verifyOTP(otpConfirmationResult, otp);
+      await verifyOTP(otpPhoneNumber, otp);
       toast({
         title: "Sign-in Complete!",
         description: "Your phone number has been verified. Welcome back!",
       });
       setShowOTPDialog(false);
-      setOtpConfirmationResult(null);
       setOtpPhoneNumber('');
       setIsSignupOTP(false);
       
@@ -187,8 +182,7 @@ const Auth = () => {
       throw new Error('Phone number not found.');
     }
     try {
-      const confirmationResult = await sendOTP(otpPhoneNumber);
-      setOtpConfirmationResult(confirmationResult);
+      await sendOTP(otpPhoneNumber);
       toast({
         title: "OTP Resent!",
         description: "A new verification code has been sent to your phone.",
@@ -320,9 +314,6 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/5 flex items-center justify-center p-4">
-      {/* Invisible container for Firebase reCAPTCHA (required for OTP) */}
-      <div id="recaptcha-container" className="hidden" />
-
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-2">
@@ -535,7 +526,7 @@ const Auth = () => {
       <OTPVerificationDialog
         open={showOTPDialog}
         phoneNumber={otpPhoneNumber}
-        confirmationResult={otpConfirmationResult}
+        confirmationResult={null}
         onVerify={handleOTPVerify}
         onResend={handleOTPResend}
         onClose={async () => {
@@ -556,7 +547,6 @@ const Auth = () => {
             navigate('/');
           }
           setShowOTPDialog(false);
-          setOtpConfirmationResult(null);
           setOtpPhoneNumber('');
           setIsSignupOTP(false);
         }}
