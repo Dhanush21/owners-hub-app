@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { db } from "@/integrations/firebase/client";
 import { collection, addDoc } from "firebase/firestore";
 import { Loader2 } from "lucide-react";
+import { notificationHelpers } from "@/services/notificationService";
 
 interface AddResidentModalProps {
   isOpen: boolean;

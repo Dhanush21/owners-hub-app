@@ -56,10 +56,6 @@ export const OTPVerificationDialog: React.FC<OTPVerificationDialogProps> = ({
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!confirmationResult) {
-      return;
-    }
-
     if (otp.length !== 6) {
       return;
     }

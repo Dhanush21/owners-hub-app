@@ -337,6 +337,66 @@ export const authAPI = {
       body: JSON.stringify({ token }),
     });
   },
+
+  // Send OTP to phone number (using Supabase Edge Function - no CAPTCHA)
+  sendOTP: async (phoneNumber: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      // Fallback to backend API if Supabase not configured
+      return apiCall('/auth/send-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phoneNumber }),
+      });
+    }
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ phoneNumber }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
+      throw new Error(error.error || error.message || 'Failed to send OTP');
+    }
+
+    return response.json();
+  },
+
+  // Verify OTP (using Supabase Edge Function - no CAPTCHA)
+  verifyOTP: async (phoneNumber: string, otp: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      // Fallback to backend API if Supabase not configured
+      return apiCall('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phoneNumber, otp }),
+      });
+    }
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/verify-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ phoneNumber, otp }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
+      throw new Error(error.error || error.message || 'Failed to verify OTP');
+    }
+
+    return response.json();
+  },
 };
 
 export default {
