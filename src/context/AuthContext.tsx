@@ -200,8 +200,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  
-
   // Helper to create / get the RecaptchaVerifier instance (invisible)
   const getOrCreateRecaptchaVerifier = async (): Promise<RecaptchaVerifier> => {
     if (recaptchaVerifier) return recaptchaVerifier;
