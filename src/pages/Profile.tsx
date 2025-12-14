@@ -32,7 +32,7 @@ const Profile = () => {
         fullName: userProfile.fullName || '',
         email: userProfile.email || '',
         phoneNumber: userProfile.phoneNumber || '',
-        role: userProfile.role || 'resident',
+        role: userProfile.role === 'owner' ? 'owner' : 'resident',
       });
     }
     setLoading(false);

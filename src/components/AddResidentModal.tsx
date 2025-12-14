@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/context/AuthContext";
 import { db } from "@/integrations/firebase/client";
 import { collection, addDoc } from "firebase/firestore";
 import { Loader2 } from "lucide-react";
@@ -19,7 +18,6 @@ interface AddResidentModalProps {
 
 const AddResidentModal = ({ isOpen, onClose, onResidentAdded }: AddResidentModalProps) => {
   const { toast } = useToast();
-  const { user, userProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -34,56 +32,30 @@ const AddResidentModal = ({ isOpen, onClose, onResidentAdded }: AddResidentModal
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!user || user.isAnonymous) {
-      toast({
-        title: "Error",
-        description: "Please sign in to add residents.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!formData.unit) {
-      toast({
-        title: "Error",
-        description: "Please select a unit.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsLoading(true);
     
     try {
-      // Create resident in Firestore
-      // Note: This only creates a database record, not a Firebase Auth account
-      // The resident will need to register with Firebase Auth separately to log in
+      // Save new resident to Firebase
       const residentData = {
-        email: formData.email,
         fullName: formData.name,
-        name: formData.name,
+        email: formData.email,
         phone: formData.phone,
-        role: "resident",
         unit: formData.unit,
-        monthlyRent: formData.monthlyRent ? parseFloat(formData.monthlyRent) : 0,
-        securityDeposit: formData.securityDeposit ? parseFloat(formData.securityDeposit) : 0,
-        leaseStart: formData.leaseStart || null,
-        leaseEnd: formData.leaseEnd || null,
+        leaseStart: formData.leaseStart,
+        leaseEnd: new Date(formData.leaseEnd).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        monthlyRent: parseFloat(formData.monthlyRent),
+        securityDeposit: parseFloat(formData.securityDeposit),
+        role: "resident",
         status: "active",
-        ownerId: user.uid,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        rentPaid: true,
+        createdAt: new Date().toISOString()
       };
 
-      const residentDocRef = await addDoc(collection(db, "residents"), residentData);
-      
-      // Create notification for resident added
-      await notificationHelpers.residentAdded(user.uid, formData.name, formData.unit, residentDocRef.id);
+      await addDoc(collection(db, 'users'), residentData);
       
       toast({
         title: "Resident Added",
-        description: "New resident has been successfully added to your property. They will need to register their account to log in.",
+        description: "New resident has been successfully added to your property.",
       });
       
       // Reset form
@@ -104,11 +76,11 @@ const AddResidentModal = ({ isOpen, onClose, onResidentAdded }: AddResidentModal
       }
       
       onClose();
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error adding resident:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to add resident. Please try again.",
+        description: "Failed to add resident. Please try again.",
         variant: "destructive",
       });
     } finally {
