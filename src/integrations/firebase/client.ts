@@ -15,6 +15,13 @@ const firebaseConfig = {
 
 let app: FirebaseApp;
 if (!getApps().length) {
+  // Sanity check: don't use an Android appId for web builds — this often causes reCAPTCHA and phone-auth problems
+  if (typeof window !== 'undefined' && (firebaseConfig.appId || '').includes(':android:')) {
+    // Throwing would break development; warn loudly to help debugging
+    // eslint-disable-next-line no-console
+    console.warn('Firebase appId looks like an Android appId — ensure VITE_FIREBASE_APP_ID is set to a web app id for browser builds. Using Android appId on web can break reCAPTCHA and phone auth.');
+  }
+
   app = initializeApp(firebaseConfig);
 } else {
   app = getApps()[0]!;

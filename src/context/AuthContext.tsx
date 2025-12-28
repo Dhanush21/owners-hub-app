@@ -201,18 +201,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Helper to determine if we're inside an Android WebView (Capacitor or other)
-  const isRunningInAndroidWebView = (): boolean => {
+  // Helper to determine if we're running in a native mobile environment (Capacitor Android/iOS WebView)
+  const isRunningInNativeWebView = (): boolean => {
     try {
-      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
-      // Capacitor detection (preferred)
-      if (Capacitor && typeof Capacitor.getPlatform === 'function' && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative) {
-        return true;
+      if (Capacitor && typeof Capacitor.getPlatform === 'function' && (Capacitor as any).isNative) {
+        const p = Capacitor.getPlatform();
+        return p === 'android' || p === 'ios';
       }
 
-      // WebView UA heuristics: contains 'android' and either 'wv' or 'version/X' without Chrome/Chromium
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
+      // Generic WebView heuristics (Android/iOS)
       if (ua.includes('android')) {
         if (ua.includes('; wv') || /version\/\d+/i.test(ua) || !/chrome\/[\d]+/i.test(ua)) {
+          return true;
+        }
+      }
+      if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) {
+        // iOS WebViews often don't include 'safari' token
+        if (!ua.includes('safari') || ua.includes('version/')) {
           return true;
         }
       }
@@ -222,45 +228,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return false;
   };
 
+  // protect: in-flight initialization lock to avoid creating multiple RecaptchaVerifier instances simultaneously
+  const recaptchaInitPromiseRef = React.useRef<Promise<RecaptchaVerifier> | null>(null);
+  // Guard to avoid concurrent OTP sends which can be interpreted as abuse
+  const otpSendingRef = React.useRef<boolean>(false);
+
   // Helper to create / get the RecaptchaVerifier instance (invisible)
   const getOrCreateRecaptchaVerifier = async (): Promise<RecaptchaVerifier> => {
     if (recaptchaVerifier) return recaptchaVerifier;
+
+    // If another call is creating the verifier, wait for it
+    if (recaptchaInitPromiseRef.current) {
+      return recaptchaInitPromiseRef.current;
+    }
 
     // Safe guard: only run on DOM environment
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       throw new Error('Recaptcha requires a browser environment');
     }
 
-    // Detect Android WebView and fail early — reCAPTCHA-based web flows are not supported inside Android WebView
-    if (isRunningInAndroidWebView()) {
+    // Detect native WebView and prevent using web reCAPTCHA there
+    if (isRunningInNativeWebView()) {
       throw new Error(
-        'reCAPTCHA-based phone auth is unsupported inside Android WebView. Use native Firebase phone auth (e.g., @capacitor-firebase/auth) or your backend SMS flow when running on Android.'
+        'reCAPTCHA-based phone auth is unsupported inside native WebViews. Use native Firebase phone auth (e.g., @capacitor-firebase/authentication) or your backend SMS flow when running on mobile.'
       );
     }
 
-    const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-      size: 'invisible',
-      callback: () => {
-        /* noop: handled by signInWithPhoneNumber flow */
-      },
-      'expired-callback': () => {
-        console.warn('reCAPTCHA expired');
-      },
-    });
+    // Initialize once and store promise so concurrent callers reuse it
+    recaptchaInitPromiseRef.current = (async () => {
+      const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          /* noop: handled by signInWithPhoneNumber flow */
+        },
+        'expired-callback': () => {
+          console.warn('reCAPTCHA expired');
+        },
+      });
 
-    try {
-      // render may be required by some firebase versions
-      // render returns a promise/number depending on version; we ignore returned value
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      await verifier.render?.();
-    } catch (e) {
-      // render can fail if already rendered; ignore and continue with verifier
-      console.warn('recaptcha render warning', e);
-    }
+      try {
+        // render may be required by some firebase versions
+        // render returns a promise/number depending on version; we ignore returned value
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        await verifier.render?.();
+      } catch (e) {
+        // render can fail if already rendered; ignore and continue with verifier
+        console.warn('recaptcha render warning', e);
+      }
 
-    setRecaptchaVerifier(verifier);
-    return verifier;
+      setRecaptchaVerifier(verifier);
+      recaptchaInitPromiseRef.current = null;
+      return verifier;
+    })();
+
+    return recaptchaInitPromiseRef.current;
   };
 
   // sendOTP returns a ConfirmationResult which must be confirmed with confirmationResult.confirm(code)
@@ -269,8 +291,14 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     ? phoneNumber
     : `+${phoneNumber.replace(/\D/g, '')}`;
 
-  // Android WebView: prefer native plugin / server flow instead of web reCAPTCHA
-  if (isRunningInAndroidWebView()) {
+  // Prevent concurrent requests — Firebase treats rapid repeated verification attempts as abuse
+  if (otpSendingRef.current) {
+    throw new Error('OTP request already in progress');
+  }
+  otpSendingRef.current = true;
+
+  // Native WebView: prefer native plugin / server flow instead of web reCAPTCHA
+  if (isRunningInNativeWebView()) {
     try {
       // dynamic import the plugin the repo already depends on
       const mod = await import('@capacitor-firebase/authentication').catch(() => null);
@@ -377,7 +405,7 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     return confirmationResult;
   } catch (error: any) {
     // inspect Firebase error details — log them to console (also surface user-friendly message)
-    const webview = isRunningInAndroidWebView();
+    const webview = isRunningInNativeWebView();
     console.error('sendOTP error:', {
       name: error?.name,
       code: error?.code,
@@ -408,6 +436,8 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
 
     // Otherwise rethrow original error so caller can inspect
     throw error;
+  } finally {
+    otpSendingRef.current = false;
   }
 };
 
