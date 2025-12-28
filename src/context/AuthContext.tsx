@@ -15,7 +15,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '@/integrations/firebase/client';
 import { doc, setDoc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
-// import { authAPI } from '@/services/api'; // unused in this snippet
+import { authAPI } from '@/services/api';
 
 interface UserProfile {
   fullName: string;
@@ -201,6 +201,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Helper to determine if we're inside an Android WebView (Capacitor or other)
+  const isRunningInAndroidWebView = (): boolean => {
+    try {
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
+      // Capacitor detection (preferred)
+      if (Capacitor && typeof Capacitor.getPlatform === 'function' && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative) {
+        return true;
+      }
+
+      // WebView UA heuristics: contains 'android' and either 'wv' or 'version/X' without Chrome/Chromium
+      if (ua.includes('android')) {
+        if (ua.includes('; wv') || /version\/\d+/i.test(ua) || !/chrome\/[\d]+/i.test(ua)) {
+          return true;
+        }
+      }
+    } catch (e) {
+      // ignore and assume not webview
+    }
+    return false;
+  };
+
   // Helper to create / get the RecaptchaVerifier instance (invisible)
   const getOrCreateRecaptchaVerifier = async (): Promise<RecaptchaVerifier> => {
     if (recaptchaVerifier) return recaptchaVerifier;
@@ -210,10 +231,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Recaptcha requires a browser environment');
     }
 
-    // Detect Capacitor Android WebView environment — reCAPTCHA-based web flows are not supported inside Android WebView
-    const isAndroidWebView = Capacitor.getPlatform && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative;
-    if (isAndroidWebView) {
-      // Fail early with a clear message so caller can fall back to native plugin / backend flow instead of hammering the web reCAPTCHA endpoint
+    // Detect Android WebView and fail early — reCAPTCHA-based web flows are not supported inside Android WebView
+    if (isRunningInAndroidWebView()) {
       throw new Error(
         'reCAPTCHA-based phone auth is unsupported inside Android WebView. Use native Firebase phone auth (e.g., @capacitor-firebase/auth) or your backend SMS flow when running on Android.'
       );
@@ -250,26 +269,47 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     ? phoneNumber
     : `+${phoneNumber.replace(/\D/g, '')}`;
 
-  // Detect Android WebView — prefer native plugin/mobile flow there
-  const isAndroidWebView = Capacitor.getPlatform && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative;
-  if (isAndroidWebView) {
+  // Android WebView: prefer native plugin / server flow instead of web reCAPTCHA
+  if (isRunningInAndroidWebView()) {
     try {
-      // dynamic import so web build does not break if plugin not installed
+      // dynamic import the plugin the repo already depends on
       const mod = await import('@capacitor-firebase/authentication').catch(() => null);
-      // plugin shape: some exports are { FirebaseAuthentication }, some default export
       const plugin = (mod && ((mod as any).FirebaseAuthentication || (mod as any).default || mod)) || null;
 
       if (!plugin) {
-        throw new Error('Native phone auth plugin not installed. Install and configure @capacitor-firebase/auth and add Firebase Android config (google-services.json, SHA-256).');
+        // If plugin missing, *fallback to server-side SMS* if available (avoids triggering web reCAPTCHA)
+        console.warn('Native phone auth plugin not installed; attempting server-side SMS fallback');
+        try {
+          const resp = await authAPI.auth.sendOTP(formattedPhone);
+          // adapter: server-based confirmation
+          return {
+            confirm: async (code: string) => {
+              const verification = await authAPI.auth.verifyOTP(formattedPhone, code);
+              if (!verification || (verification as any).error) {
+                throw new Error((verification as any).error || 'Server-side verification failed');
+              }
+
+              // Apply phoneVerified to Firebase user profile if signed in
+              if (auth.currentUser) {
+                const profileRef = doc(db, 'users', auth.currentUser.uid);
+                await updateDoc(profileRef, { phoneVerified: true, phoneNumber: formattedPhone });
+                setUserProfile((prev) => (prev ? { ...prev, phoneVerified: true, phoneNumber: formattedPhone } : prev));
+              }
+
+              return { user: auth.currentUser || { phoneNumber: formattedPhone } };
+            },
+          } as unknown as ConfirmationResult;
+        } catch (srvErr: any) {
+          console.warn('Server-side SMS fallback failed', srvErr);
+          throw new Error('Native plugin missing and server SMS fallback failed. Install the native plugin or configure a server SMS provider.');
+        }
       }
 
-      // The @capacitor-firebase/auth plugin exposes methods like: signInWithPhoneNumber, verifyPhoneNumber, signInWithVerificationCode.
-      // Use the plugin's methods directly when available.
+      // Use installed plugin's methods
       if (typeof plugin.signInWithPhoneNumber === 'function') {
         const verification: any = await plugin.signInWithPhoneNumber({ phoneNumber: formattedPhone });
         const verificationId = verification?.verificationId || verification?.id || verification?.verification_id || verification?.session;
 
-        // If verificationId present, return adapter with confirm that uses verify APIs
         if (verificationId) {
           return {
             confirm: async (code: string) => {
@@ -286,7 +326,6 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
           } as unknown as ConfirmationResult;
         }
 
-        // If verification object expects confirm step directly
         return {
           confirm: async (code: string) => {
             if (typeof plugin.verifyPhoneNumber === 'function') {
@@ -298,7 +337,6 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
         } as unknown as ConfirmationResult;
       }
 
-      // Some plugin flavors use startPhoneNumberVerification + verifyPhoneNumber
       if (typeof plugin.startPhoneNumberVerification === 'function') {
         const verification: any = await plugin.startPhoneNumberVerification({ phoneNumber: formattedPhone });
         const verificationId = verification?.verificationId || verification?.session || verification?.id;
@@ -313,7 +351,6 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
         } as unknown as ConfirmationResult;
       }
 
-      // Fallback: some plugin exposes signInWithVerificationCode directly
       if (typeof plugin.signInWithVerificationCode === 'function') {
         const verification: any = await plugin.signInWithPhoneNumber?.({ phoneNumber: formattedPhone }).catch(() => null) || {};
         const verificationId = verification?.verificationId || verification?.id || verification?.session;
@@ -329,7 +366,7 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     } catch (nativeErr: any) {
       console.warn('Native phone auth attempt failed', nativeErr);
       throw new Error(
-        'Phone authentication on Android failed with native plugin. Install/configure @capacitor-firebase/auth and add google-services.json + SHA-256, or fallback to server-based SMS flow.'
+        'Phone authentication on Android failed with native plugin. Install/configure @capacitor-firebase/authentication and add google-services.json + SHA-256, or fallback to server-based SMS flow.'
       );
     }
   }
@@ -340,18 +377,25 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     return confirmationResult;
   } catch (error: any) {
     // inspect Firebase error details — log them to console (also surface user-friendly message)
+    const webview = isRunningInAndroidWebView();
     console.error('sendOTP error:', {
       name: error?.name,
       code: error?.code,
       message: error?.message,
       // Some SDKs put extra details in error.customData
       customData: error?.customData || error?.custom_data,
+      isAndroidWebView: webview,
+      recaptchaInitialized: !!recaptchaVerifier,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
     });
 
     // Common error mappings
     if (error?.code === 'auth/invalid-phone-number' || (error?.message || '').includes('INVALID_PHONE_NUMBER')) {
       throw new Error('Invalid phone number. Ensure E.164 format (e.g. +919876543210).');
     } else if (error?.code === 'auth/too-many-requests') {
+      if (webview) {
+        throw new Error('Too many requests — reCAPTCHA-based web verification is blocked or unreliable inside Android WebView. Install a native Firebase Auth plugin (see /docs/android-phone-auth.md) or use the server-side SMS fallback.');
+      }
       throw new Error('Too many requests. Please try again later.');
     } else if (error?.code === 'auth/quota-exceeded') {
       throw new Error('SMS quota exceeded for this project. Consider enabling billing or using a test device.');
