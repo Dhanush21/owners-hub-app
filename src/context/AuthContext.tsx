@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   User,
   signInWithEmailAndPassword,
@@ -209,6 +210,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Recaptcha requires a browser environment');
     }
 
+    // Detect Capacitor Android WebView environment — reCAPTCHA-based web flows are not supported inside Android WebView
+    const isAndroidWebView = Capacitor.getPlatform && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative;
+    if (isAndroidWebView) {
+      // Fail early with a clear message so caller can fall back to native plugin / backend flow instead of hammering the web reCAPTCHA endpoint
+      throw new Error(
+        'reCAPTCHA-based phone auth is unsupported inside Android WebView. Use native Firebase phone auth (e.g., @capacitor-firebase/auth) or your backend SMS flow when running on Android.'
+      );
+    }
+
     const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
       size: 'invisible',
       callback: () => {
@@ -239,6 +249,90 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
   const formattedPhone = phoneNumber.startsWith('+')
     ? phoneNumber
     : `+${phoneNumber.replace(/\D/g, '')}`;
+
+  // Detect Android WebView — prefer native plugin/mobile flow there
+  const isAndroidWebView = Capacitor.getPlatform && Capacitor.getPlatform() === 'android' && (Capacitor as any).isNative;
+  if (isAndroidWebView) {
+    try {
+      // dynamic import so web build does not break if plugin not installed
+      const mod = await import('@capacitor-firebase/authentication').catch(() => null);
+      // plugin shape: some exports are { FirebaseAuthentication }, some default export
+      const plugin = (mod && ((mod as any).FirebaseAuthentication || (mod as any).default || mod)) || null;
+
+      if (!plugin) {
+        throw new Error('Native phone auth plugin not installed. Install and configure @capacitor-firebase/auth and add Firebase Android config (google-services.json, SHA-256).');
+      }
+
+      // The @capacitor-firebase/auth plugin exposes methods like: signInWithPhoneNumber, verifyPhoneNumber, signInWithVerificationCode.
+      // Use the plugin's methods directly when available.
+      if (typeof plugin.signInWithPhoneNumber === 'function') {
+        const verification: any = await plugin.signInWithPhoneNumber({ phoneNumber: formattedPhone });
+        const verificationId = verification?.verificationId || verification?.id || verification?.verification_id || verification?.session;
+
+        // If verificationId present, return adapter with confirm that uses verify APIs
+        if (verificationId) {
+          return {
+            confirm: async (code: string) => {
+              if (typeof plugin.verifyPhoneNumber === 'function') {
+                const res = await plugin.verifyPhoneNumber({ verificationId, verificationCode: code });
+                return { user: auth.currentUser || res?.user };
+              }
+              if (typeof plugin.signInWithVerificationCode === 'function') {
+                const res = await plugin.signInWithVerificationCode({ verificationId, verificationCode: code });
+                return { user: auth.currentUser || res?.user };
+              }
+              throw new Error('Native plugin did not provide a verify method');
+            },
+          } as unknown as ConfirmationResult;
+        }
+
+        // If verification object expects confirm step directly
+        return {
+          confirm: async (code: string) => {
+            if (typeof plugin.verifyPhoneNumber === 'function') {
+              const res = await plugin.verifyPhoneNumber({ verificationId: verification?.id || verification?.verificationId, verificationCode: code });
+              return { user: auth.currentUser || res?.user };
+            }
+            throw new Error('Plugin returned no verificationId and has no verifyPhoneNumber method.');
+          },
+        } as unknown as ConfirmationResult;
+      }
+
+      // Some plugin flavors use startPhoneNumberVerification + verifyPhoneNumber
+      if (typeof plugin.startPhoneNumberVerification === 'function') {
+        const verification: any = await plugin.startPhoneNumberVerification({ phoneNumber: formattedPhone });
+        const verificationId = verification?.verificationId || verification?.session || verification?.id;
+        return {
+          confirm: async (code: string) => {
+            if (typeof plugin.verifyPhoneNumber === 'function') {
+              const res = await plugin.verifyPhoneNumber({ verificationId, verificationCode: code });
+              return { user: auth.currentUser || res?.user };
+            }
+            throw new Error('startPhoneNumberVerification used but plugin has no verifyPhoneNumber method');
+          },
+        } as unknown as ConfirmationResult;
+      }
+
+      // Fallback: some plugin exposes signInWithVerificationCode directly
+      if (typeof plugin.signInWithVerificationCode === 'function') {
+        const verification: any = await plugin.signInWithPhoneNumber?.({ phoneNumber: formattedPhone }).catch(() => null) || {};
+        const verificationId = verification?.verificationId || verification?.id || verification?.session;
+        return {
+          confirm: async (code: string) => {
+            const res = await plugin.signInWithVerificationCode({ verificationId, verificationCode: code });
+            return { user: auth.currentUser || res?.user };
+          },
+        } as unknown as ConfirmationResult;
+      }
+
+      throw new Error('Native phone auth plugin found but does not expose a known phone verification API.');
+    } catch (nativeErr: any) {
+      console.warn('Native phone auth attempt failed', nativeErr);
+      throw new Error(
+        'Phone authentication on Android failed with native plugin. Install/configure @capacitor-firebase/auth and add google-services.json + SHA-256, or fallback to server-based SMS flow.'
+      );
+    }
+  }
 
   try {
     const verifier = await getOrCreateRecaptchaVerifier();
@@ -278,27 +372,32 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
     try {
       const result = await confirmationResult.confirm(otp);
 
-      if (result.user) {
-        const profileRef = doc(db, 'users', result.user.uid);
+      // Native plugin adapters may not return a Firebase user object. Prefer Firebase `auth.currentUser` where possible.
+      const firebaseUser = (result && (result as any).user) || auth.currentUser;
+
+      if (firebaseUser) {
+        const profileRef = doc(db, 'users', firebaseUser.uid);
         const profileDoc = await getDoc(profileRef);
+
+        const phoneNumberToUse = firebaseUser.phoneNumber || '';
 
         if (profileDoc.exists()) {
           const profileData = profileDoc.data() as UserProfile;
           await updateDoc(profileRef, {
             phoneVerified: true,
-            phoneNumber: profileData.phoneNumber || result.user.phoneNumber || '',
+            phoneNumber: profileData.phoneNumber || phoneNumberToUse,
           });
 
           setUserProfile({
             ...profileData,
             phoneVerified: true,
-            phoneNumber: profileData.phoneNumber || result.user.phoneNumber || '',
+            phoneNumber: profileData.phoneNumber || phoneNumberToUse,
           });
         } else {
           const newProfile: UserProfile = {
-            fullName: result.user.displayName || 'User',
-            email: result.user.email || '',
-            phoneNumber: result.user.phoneNumber || '',
+            fullName: firebaseUser.displayName || 'User',
+            email: firebaseUser.email || '',
+            phoneNumber: phoneNumberToUse,
             phoneVerified: true,
             createdAt: new Date().toISOString(),
             role: 'resident',

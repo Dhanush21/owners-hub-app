@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,6 +21,7 @@
     "firebase:test": "./scripts/test-firebase-setup.sh"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "^7.5.0",
     "@capacitor/android": "^7.4.3",
     "@capacitor/core": "^7.4.3",
     "@capacitor/ios": "^7.4.3",
