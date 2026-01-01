@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { OTPVerificationDialog } from '@/components/OTPVerificationDialog';
+import PhoneOTPAuth from '@/components/PhoneOTPAuth';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Home, UserPlus, LogIn, Users } from 'lucide-react';
 
@@ -38,6 +40,7 @@ const Auth: React.FC = () => {
   // OTP Verification state
   const [showOTPDialog, setShowOTPDialog] = useState(false);
   const [otpPhoneNumber, setOtpPhoneNumber] = useState('');
+  const [showPhoneOtpDialog, setShowPhoneOtpDialog] = useState(false);
   const [isSignupOTP, setIsSignupOTP] = useState(false); // Track if OTP is for signup
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
@@ -247,6 +250,18 @@ const Auth: React.FC = () => {
     }
   };
 
+  // Phone OTP dialog handlers (uses native Capacitor plugin via PhoneOTPAuth)
+  const handlePhoneSignInSuccess = (res?: any) => {
+    setShowPhoneOtpDialog(false);
+    toast({ title: 'Signed in', description: 'Phone sign-in was successful.' });
+    navigate('/');
+  };
+
+  const handlePhoneSignInError = (err: any) => {
+    setShowPhoneOtpDialog(false);
+    toast({ title: 'Phone sign-in failed', description: err?.message || 'Please try again.', variant: 'destructive' });
+  };
+
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -412,6 +427,9 @@ const Auth: React.FC = () => {
                   <Button type="button" variant="link" className="w-full" onClick={() => setShowForgotPassword(true)}>
                     Forgot Password?
                   </Button>
+                  <Button type="button" variant="outline" className="w-full" onClick={() => setShowPhoneOtpDialog(true)}>
+                    Sign in with phone (OTP)
+                  </Button>
                 </form>
               </CardContent>
             </Card>
@@ -531,6 +549,20 @@ const Auth: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Phone OTP Dialog (native Capacitor plugin) */}
+      <Dialog open={showPhoneOtpDialog} onOpenChange={(open) => setShowPhoneOtpDialog(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sign in with phone (OTP)</DialogTitle>
+          </DialogHeader>
+          <PhoneOTPAuth
+            defaultCountryCode={''}
+            onSuccess={(res) => handlePhoneSignInSuccess(res)}
+            onError={(err) => handlePhoneSignInError(err)}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* OTP Verification Dialog - MANDATORY for Sign-in */}
       <OTPVerificationDialog
