@@ -44,6 +44,8 @@ dependencies {
     // Firebase dependencies
     implementation platform('com.google.firebase:firebase-bom:34.2.0')
     implementation 'com.google.firebase:firebase-analytics'
+    // Firebase Authentication (required for native Android Phone Auth)
+    implementation 'com.google.firebase:firebase-auth' 
 }
 
 apply from: 'capacitor.build.gradle'

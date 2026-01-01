@@ -300,104 +300,71 @@ const sendOTP = async (phoneNumber: string): Promise<ConfirmationResult> => {
   // Native WebView: prefer native plugin / server flow instead of web reCAPTCHA
   if (isRunningInNativeWebView()) {
     try {
-      // dynamic import the plugin the repo already depends on
-      const mod = await import('@capacitor-firebase/authentication').catch(() => null);
-      const plugin = (mod && ((mod as any).FirebaseAuthentication || (mod as any).default || mod)) || null;
+          // Use typed adapter that centralizes plugin import & errors
+          const adapter = await import('@/integrations/firebase/capacitorAuth').then((m) => m.default || m);
+          const adp = adapter as any;
 
-      if (!plugin) {
-        // If plugin missing, *fallback to server-side SMS* if available (avoids triggering web reCAPTCHA)
-        console.warn('Native phone auth plugin not installed; attempting server-side SMS fallback');
-        try {
-          const resp = await authAPI.auth.sendOTP(formattedPhone);
-          // adapter: server-based confirmation
-          return {
-            confirm: async (code: string) => {
-              const verification = await authAPI.auth.verifyOTP(formattedPhone, code);
-              if (!verification || (verification as any).error) {
-                throw new Error((verification as any).error || 'Server-side verification failed');
-              }
+          const available = await adp.isPluginAvailable?.();
+          if (!available) {
+            // If plugin missing, *fallback to server-side SMS* if available (avoids triggering web reCAPTCHA)
+            console.warn('Native phone auth plugin not installed; attempting server-side SMS fallback');
+            try {
+              const resp = await authAPI.sendOTP(formattedPhone);
+              // adapter: server-based confirmation
+              return {
+                confirm: async (code: string) => {
+                  const verification = await authAPI.verifyOTP(formattedPhone, code);
+                  if (!verification || (verification as any).error) {
+                    throw new Error((verification as any).error || 'Server-side verification failed');
+                  }
 
-              // Apply phoneVerified to Firebase user profile if signed in
-              if (auth.currentUser) {
-                const profileRef = doc(db, 'users', auth.currentUser.uid);
-                await updateDoc(profileRef, { phoneVerified: true, phoneNumber: formattedPhone });
-                setUserProfile((prev) => (prev ? { ...prev, phoneVerified: true, phoneNumber: formattedPhone } : prev));
-              }
+                  // Apply phoneVerified to Firebase user profile if signed in
+                  if (auth.currentUser) {
+                    const profileRef = doc(db, 'users', auth.currentUser.uid);
+                    await updateDoc(profileRef, { phoneVerified: true, phoneNumber: formattedPhone });
+                    setUserProfile((prev) => (prev ? { ...prev, phoneVerified: true, phoneNumber: formattedPhone } : prev));
+                  }
 
-              return { user: auth.currentUser || { phoneNumber: formattedPhone } };
-            },
-          } as unknown as ConfirmationResult;
-        } catch (srvErr: any) {
-          console.warn('Server-side SMS fallback failed', srvErr);
-          throw new Error('Native plugin missing and server SMS fallback failed. Install the native plugin or configure a server SMS provider.');
+                  return { user: auth.currentUser || { phoneNumber: formattedPhone } };
+                },
+              } as unknown as ConfirmationResult;
+            } catch (srvErr: any) {
+              console.warn('Server-side SMS fallback failed', srvErr);
+              throw new Error('Native plugin missing and server SMS fallback failed. Install the native plugin or configure a server SMS provider.');
+            }
+          }
+
+          // Try adapter's sign-in variants
+          const verification: any = await (adp.signInWithPhoneNumberNative?.({ phoneNumber: formattedPhone }) || adp.startPhoneNumberVerificationNative?.({ phoneNumber: formattedPhone }));
+          const verificationId = verification?.verificationId || verification?.id || verification?.verification_id || verification?.session;
+
+          if (verificationId) {
+            return {
+              confirm: async (code: string) => {
+                const res = await (adapter.verifyPhoneNumberNative?.({ verificationId, verificationCode: code }) || adapter.verifyPhoneNumberNative?.({ verificationId, verificationCode: code }));
+                return { user: auth.currentUser || res?.user };
+              },
+            } as unknown as ConfirmationResult;
+          }
+
+          // Some plugins provide signInWithVerificationCode directly
+          if (adp.signInWithVerificationCodeNative) {
+            return {
+              confirm: async (code: string) => {
+                const res = await adp.signInWithVerificationCodeNative({ verificationId: verification?.id || verification?.verificationId, verificationCode: code });
+                return { user: auth.currentUser || res?.user };
+              },
+            } as unknown as ConfirmationResult;
+          }
+
+          throw new Error('Native phone auth plugin found but did not return a verification session.');
+        } catch (nativeErr: any) {
+          console.warn('Native phone auth attempt failed', nativeErr?.message || nativeErr);
+          throw new Error(
+            'Phone authentication on Android failed with native plugin. Ensure plugin is installed/configured, `google-services.json` exists, and SHA-256 fingerprints are added in Firebase console.'
+          );
         }
       }
-
-      // Use installed plugin's methods
-      if (typeof plugin.signInWithPhoneNumber === 'function') {
-        const verification: any = await plugin.signInWithPhoneNumber({ phoneNumber: formattedPhone });
-        const verificationId = verification?.verificationId || verification?.id || verification?.verification_id || verification?.session;
-
-        if (verificationId) {
-          return {
-            confirm: async (code: string) => {
-              if (typeof plugin.verifyPhoneNumber === 'function') {
-                const res = await plugin.verifyPhoneNumber({ verificationId, verificationCode: code });
-                return { user: auth.currentUser || res?.user };
-              }
-              if (typeof plugin.signInWithVerificationCode === 'function') {
-                const res = await plugin.signInWithVerificationCode({ verificationId, verificationCode: code });
-                return { user: auth.currentUser || res?.user };
-              }
-              throw new Error('Native plugin did not provide a verify method');
-            },
-          } as unknown as ConfirmationResult;
-        }
-
-        return {
-          confirm: async (code: string) => {
-            if (typeof plugin.verifyPhoneNumber === 'function') {
-              const res = await plugin.verifyPhoneNumber({ verificationId: verification?.id || verification?.verificationId, verificationCode: code });
-              return { user: auth.currentUser || res?.user };
-            }
-            throw new Error('Plugin returned no verificationId and has no verifyPhoneNumber method.');
-          },
-        } as unknown as ConfirmationResult;
-      }
-
-      if (typeof plugin.startPhoneNumberVerification === 'function') {
-        const verification: any = await plugin.startPhoneNumberVerification({ phoneNumber: formattedPhone });
-        const verificationId = verification?.verificationId || verification?.session || verification?.id;
-        return {
-          confirm: async (code: string) => {
-            if (typeof plugin.verifyPhoneNumber === 'function') {
-              const res = await plugin.verifyPhoneNumber({ verificationId, verificationCode: code });
-              return { user: auth.currentUser || res?.user };
-            }
-            throw new Error('startPhoneNumberVerification used but plugin has no verifyPhoneNumber method');
-          },
-        } as unknown as ConfirmationResult;
-      }
-
-      if (typeof plugin.signInWithVerificationCode === 'function') {
-        const verification: any = await plugin.signInWithPhoneNumber?.({ phoneNumber: formattedPhone }).catch(() => null) || {};
-        const verificationId = verification?.verificationId || verification?.id || verification?.session;
-        return {
-          confirm: async (code: string) => {
-            const res = await plugin.signInWithVerificationCode({ verificationId, verificationCode: code });
-            return { user: auth.currentUser || res?.user };
-          },
-        } as unknown as ConfirmationResult;
-      }
-
-      throw new Error('Native phone auth plugin found but does not expose a known phone verification API.');
-    } catch (nativeErr: any) {
-      console.warn('Native phone auth attempt failed', nativeErr);
-      throw new Error(
-        'Phone authentication on Android failed with native plugin. Install/configure @capacitor-firebase/authentication and add google-services.json + SHA-256, or fallback to server-based SMS flow.'
-      );
-    }
-  }
 
   try {
     const verifier = await getOrCreateRecaptchaVerifier();
