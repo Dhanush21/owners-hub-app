@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Check, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { db } from "@/integrations/firebase/client";
 import { collection, addDoc } from "firebase/firestore";
+import { useAuth } from "@/context/AuthContext";
 
 declare global {
   interface Window {
@@ -14,9 +15,32 @@ declare global {
   }
 }
 
+const loadRazorpayScript = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    // Avoid loading the script more than once
+    if (window.Razorpay) {
+      resolve();
+      return;
+    }
+    const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve());
+      existingScript.addEventListener('error', () => reject(new Error('Failed to load payment gateway.')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load payment gateway. Please check your internet connection and try again.'));
+    document.body.appendChild(script);
+  });
+};
+
 const Subscription = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, userProfile } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const plans = [
@@ -68,7 +92,7 @@ const Subscription = () => {
     }
   ];
 
-  const handlePayment = async (plan: typeof plans[0]) => {
+  const handlePayment = useCallback(async (plan: typeof plans[0]) => {
     if (plan.price === 0) {
       toast({
         title: "Already on Free Plan",
@@ -80,96 +104,92 @@ const Subscription = () => {
     setLoading(true);
 
     try {
-      // Load Razorpay script
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      document.body.appendChild(script);
+      await loadRazorpayScript();
 
-      script.onload = () => {
-        const options = {
-          key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-          amount: plan.price * 100, // Amount in paise
-          currency: 'INR',
-          name: 'Owners Hub',
-          description: `${plan.name} Plan Subscription`,
-          image: '/favicon.ico',
-          handler: async function (response: any) {
-            try {
-              // Store subscription details in Firebase Firestore
-              await addDoc(collection(db, 'subscriptions'), {
-                payment_id: response.razorpay_payment_id,
-                plan: plan.name,
-                amount: plan.price,
-                currency: 'INR',
-                status: 'paid',
-                date: new Date().toISOString(),
-                user_email: 'user@example.com', // Replace with actual user email
-                user_id: 'user123', // Replace with actual user ID
-                features: plan.features,
-                period: plan.period
-              });
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: plan.price * 100, // Amount in paise
+        currency: 'INR',
+        name: 'Owners Hub',
+        description: `${plan.name} Plan Subscription`,
+        image: '/favicon.ico',
+        handler: async function (response: any) {
+          try {
+            // Store subscription details in Firebase Firestore
+            await addDoc(collection(db, 'subscriptions'), {
+              payment_id: response.razorpay_payment_id,
+              plan: plan.name,
+              amount: plan.price,
+              currency: 'INR',
+              status: 'paid',
+              date: new Date().toISOString(),
+              user_email: userProfile?.email || user?.email || '',
+              user_id: user?.uid || '',
+              features: plan.features,
+              period: plan.period
+            });
 
-              toast({
-                title: "Payment Successful!",
-                description: `Successfully subscribed to ${plan.name} plan.`,
-              });
+            toast({
+              title: "Payment Successful!",
+              description: `Successfully subscribed to ${plan.name} plan.`,
+            });
 
-              // Navigate back to settings
-              setTimeout(() => {
-                navigate('/settings');
-              }, 2000);
-            } catch (error) {
-              console.error('Error storing subscription:', error);
-              toast({
-                title: "Payment Processed",
-                description: "Payment successful but there was an issue storing details.",
-                variant: "destructive"
-              });
-            }
-          },
-          prefill: {
-            name: 'John Doe',
-            email: 'user@example.com',
-            contact: '9999999999'
-          },
-          notes: {
-            plan: plan.name,
-            period: plan.period
-          },
-          theme: {
-            color: '#3b82f6'
-          },
-          modal: {
-            ondismiss: function() {
-              setLoading(false);
-            }
+            // Navigate back to settings
+            setTimeout(() => {
+              navigate('/settings');
+            }, 2000);
+          } catch (error) {
+            console.error('Error storing subscription:', error);
+            toast({
+              title: "Payment Processed",
+              description: "Payment successful but there was an issue storing details.",
+              variant: "destructive"
+            });
           }
-        };
-
-        const rzp = new window.Razorpay(options);
-        rzp.open();
-        setLoading(false);
+        },
+        prefill: {
+          name: userProfile?.fullName || user?.displayName || '',
+          email: userProfile?.email || user?.email || '',
+          contact: userProfile?.phoneNumber || ''
+        },
+        notes: {
+          plan: plan.name,
+          period: plan.period
+        },
+        theme: {
+          color: '#3b82f6'
+        },
+        modal: {
+          ondismiss: function() {
+            setLoading(false);
+          }
+        }
       };
 
-      script.onerror = () => {
+      const rzp = new window.Razorpay(options);
+
+      rzp.on('payment.failed', function (response: any) {
+        console.error('Razorpay payment failed:', response.error);
         toast({
-          title: "Error",
-          description: "Failed to load payment gateway. Please try again.",
+          title: "Payment Failed",
+          description: response.error?.description || "Payment could not be completed. Please try again.",
           variant: "destructive"
         });
         setLoading(false);
-      };
-    } catch (error) {
+      });
+
+      rzp.open();
+      setLoading(false);
+    } catch (error: any) {
       console.error('Payment error:', error);
       toast({
         title: "Payment Error",
-        description: "Something went wrong. Please try again.",
+        description: error?.message || "Something went wrong. Please try again.",
         variant: "destructive"
       });
       setLoading(false);
     }
-  };
+  }, [user, userProfile, toast, navigate]);
 
   return (
     <div className="min-h-screen bg-background">

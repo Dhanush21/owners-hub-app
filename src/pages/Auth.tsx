@@ -128,45 +128,14 @@ const Auth: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // Step 1: Sign in with email and password
-      const userProfile = await signIn(signInData.email, signInData.password);
+      // Sign in with email and password
+      await signIn(signInData.email, signInData.password);
 
-      // Step 2: Check if user has phone number - OTP verification is MANDATORY
-      if (!userProfile?.phoneNumber) {
-        // No phone number - log out and show error
-        await logout();
-        toast({
-          title: 'Phone number required',
-          description: 'Your account must have a verified phone number. Please contact support or sign up with a phone number.',
-          variant: 'destructive',
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      // Step 3: Send OTP to phone number - MANDATORY for sign-in
-      try {
-        const formattedPhone = userProfile.phoneNumber.startsWith('+')
-          ? userProfile.phoneNumber
-          : formatToE164(userProfile.phoneNumber);
-        const result = await linkPhoneNumber(formattedPhone);
-        setConfirmationResult(result);
-        setOtpPhoneNumber(formattedPhone);
-        setIsSignupOTP(false); // This is for login, not signup
-        setShowOTPDialog(true);
-        toast({
-          title: 'Step 1 Complete!',
-          description: 'Please verify your phone number with the OTP sent to your phone to complete sign-in.',
-        });
-      } catch (otpError: any) {
-        // If OTP send fails, log out the user
-        await logout();
-        toast({
-          title: 'OTP Send Failed',
-          description: `Could not send OTP: ${otpError?.message ?? otpError}. Please try again.`,
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Welcome back!',
+        description: 'You have been signed in successfully.',
+      });
+      navigate('/');
     } catch (error: any) {
       toast({
         title: 'Sign in failed',

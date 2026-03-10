@@ -14,7 +14,7 @@ import {
   ConfirmationResult,
 } from 'firebase/auth';
 import { auth, db } from '@/integrations/firebase/client';
-import { doc, setDoc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, deleteDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { authAPI } from '@/services/api';
 
 interface UserProfile {
@@ -189,13 +189,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       if (!user.isAnonymous) {
+        // Delete user profile
         await deleteDoc(doc(db, 'users', user.uid));
+
+        // Delete user's subscriptions
+        try {
+          const subsQuery = query(collection(db, 'subscriptions'), where('user_id', '==', user.uid));
+          const subsSnapshot = await getDocs(subsQuery);
+          const deletePromises = subsSnapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+          await Promise.all(deletePromises);
+        } catch (e) {
+          console.warn('Failed to delete subscriptions data:', e);
+        }
+
+        // Delete user's chat conversations
+        try {
+          const chatsQuery = query(collection(db, 'chats'), where('user_id', '==', user.uid));
+          const chatsSnapshot = await getDocs(chatsQuery);
+          const chatDeletePromises = chatsSnapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+          await Promise.all(chatDeletePromises);
+        } catch (e) {
+          console.warn('Failed to delete chat data:', e);
+        }
       }
       await deleteUser(user);
       setUserProfile(null);
     } catch (error: any) {
       if (error.code === 'auth/requires-recent-login') {
-        throw new Error('For security reasons, please re-authenticate before deleting your account.');
+        throw new Error('For security reasons, please sign out and sign in again before deleting your account.');
       }
       throw error;
     }
