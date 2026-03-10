@@ -1,6 +1,10 @@
 # Apple App Store Rejection Fixes — Before & After
 
-This document details every code change made to fix the three Apple App Store rejection issues.
+This document details every code change made to fix the Apple App Store rejection issues.
+
+**Scope:** Payment failure on iPad + incomplete account deletion (App Store Guideline 5.1.1).  
+**Files changed:** `src/pages/Subscription.tsx`, `src/context/AuthContext.tsx`  
+**Files unchanged:** `src/pages/Auth.tsx` (original OTP/phone auth flow preserved)
 
 ---
 
