@@ -235,112 +235,12 @@ const handlePayment = useCallback(async (plan: typeof plans[0]) => {
 
 ---
 
-## 2. Demo Login Blocked by Mandatory OTP — `src/pages/Auth.tsx`
-
-### Issue
-`handleSignIn` forced OTP verification after every email/password login:
-- If the user had no phone number → forced logout.
-- If the user had a phone number → sent an OTP that Apple reviewers cannot complete.
-
-### `handleSignIn` Function
-
-**Before:**
-```tsx
-const handleSignIn = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setIsLoading(true);
-
-  try {
-    // Step 1: Sign in with email and password
-    const userProfile = await signIn(signInData.email, signInData.password);
-
-    // Step 2: Check if user has phone number - OTP verification is MANDATORY
-    if (!userProfile?.phoneNumber) {
-      // No phone number - log out and show error
-      await logout();
-      toast({
-        title: 'Phone number required',
-        description:
-          'Your account must have a verified phone number. Please contact support or sign up with a phone number.',
-        variant: 'destructive',
-      });
-      setIsLoading(false);
-      return;
-    }
-
-    // Step 3: Send OTP to phone number - MANDATORY for sign-in
-    try {
-      const formattedPhone = userProfile.phoneNumber.startsWith('+')
-        ? userProfile.phoneNumber
-        : formatToE164(userProfile.phoneNumber);
-      const result = await linkPhoneNumber(formattedPhone);
-      setConfirmationResult(result);
-      setOtpPhoneNumber(formattedPhone);
-      setIsSignupOTP(false); // This is for login, not signup
-      setShowOTPDialog(true);
-      toast({
-        title: 'Step 1 Complete!',
-        description:
-          'Please verify your phone number with the OTP sent to your phone to complete sign-in.',
-      });
-    } catch (otpError: any) {
-      // If OTP send fails, log out the user
-      await logout();
-      toast({
-        title: 'OTP Send Failed',
-        description: `Could not send OTP: ${otpError?.message ?? otpError}. Please try again.`,
-        variant: 'destructive',
-      });
-    }
-  } catch (error: any) {
-    toast({
-      title: 'Sign in failed',
-      description: error?.message || 'Please check your credentials and try again.',
-      variant: 'destructive',
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
-```
-
-**After:**
-```tsx
-const handleSignIn = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setIsLoading(true);
-
-  try {
-    // Sign in with email and password
-    await signIn(signInData.email, signInData.password);
-
-    toast({
-      title: 'Welcome back!',
-      description: 'You have been signed in successfully.',
-    });
-    navigate('/');
-  } catch (error: any) {
-    toast({
-      title: 'Sign in failed',
-      description: error?.message || 'Please check your credentials and try again.',
-      variant: 'destructive',
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
-```
-
-> **Note:** Phone OTP sign-in is still available via the separate `PhoneOTPAuth` component, and OTP verification during sign-up is unchanged.
-
----
-
-## 3. Incomplete Account Deletion — `src/context/AuthContext.tsx`
+## 2. Incomplete Account Deletion — `src/context/AuthContext.tsx`
 
 ### Issue
 `deleteAccount()` only deleted the `users` Firestore document. Subscriptions and chat data were left behind — violating Apple guideline 5.1.1.
 
-### 3a. Firestore Imports
+### 2a. Firestore Imports
 
 **Before:**
 ```tsx
@@ -352,7 +252,7 @@ import { doc, setDoc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { doc, setDoc, getDoc, deleteDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 ```
 
-### 3b. New Helper — `deleteUserCollection`
+### 2b. New Helper — `deleteUserCollection`
 
 **Before:** *(did not exist)*
 
@@ -370,7 +270,7 @@ const deleteUserCollection = async (collectionName: string, userId: string) => {
 };
 ```
 
-### 3c. `deleteAccount` Function
+### 2c. `deleteAccount` Function
 
 **Before:**
 ```tsx
@@ -428,6 +328,5 @@ const deleteAccount = async () => {
 | File | Changes |
 |------|---------|
 | `src/pages/Subscription.tsx` | Singleton script loader, auth guard, real user prefill, payment failure handler, `useCallback` |
-| `src/pages/Auth.tsx` | Removed mandatory OTP from email/password sign-in |
 | `src/context/AuthContext.tsx` | Added `deleteUserCollection` helper; `deleteAccount` now purges `subscriptions` + `chats` |
 | `src/pages/Settings.tsx` | No changes needed — Delete Account UI was already present |
