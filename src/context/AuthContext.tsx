@@ -182,6 +182,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
   };
 
+  const deleteUserCollection = async (collectionName: string, userId: string) => {
+    try {
+      const q = query(collection(db, collectionName), where('user_id', '==', userId));
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
+      await Promise.all(deletePromises);
+    } catch (e) {
+      console.warn(`Failed to delete ${collectionName} data:`, e);
+    }
+  };
+
   const deleteAccount = async () => {
     if (!user) {
       throw new Error('No user logged in');
@@ -192,25 +203,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Delete user profile
         await deleteDoc(doc(db, 'users', user.uid));
 
-        // Delete user's subscriptions
-        try {
-          const subsQuery = query(collection(db, 'subscriptions'), where('user_id', '==', user.uid));
-          const subsSnapshot = await getDocs(subsQuery);
-          const deletePromises = subsSnapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
-          await Promise.all(deletePromises);
-        } catch (e) {
-          console.warn('Failed to delete subscriptions data:', e);
-        }
-
-        // Delete user's chat conversations
-        try {
-          const chatsQuery = query(collection(db, 'chats'), where('user_id', '==', user.uid));
-          const chatsSnapshot = await getDocs(chatsQuery);
-          const chatDeletePromises = chatsSnapshot.docs.map((docSnap) => deleteDoc(docSnap.ref));
-          await Promise.all(chatDeletePromises);
-        } catch (e) {
-          console.warn('Failed to delete chat data:', e);
-        }
+        // Delete user's subscriptions and chat conversations
+        await deleteUserCollection('subscriptions', user.uid);
+        await deleteUserCollection('chats', user.uid);
       }
       await deleteUser(user);
       setUserProfile(null);

@@ -15,26 +15,40 @@ declare global {
   }
 }
 
+let razorpayLoadPromise: Promise<void> | null = null;
+
 const loadRazorpayScript = (): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    // Avoid loading the script more than once
-    if (window.Razorpay) {
-      resolve();
-      return;
-    }
-    const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+  if (window.Razorpay) {
+    return Promise.resolve();
+  }
+  if (razorpayLoadPromise) {
+    return razorpayLoadPromise;
+  }
+  razorpayLoadPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
     if (existingScript) {
+      if (window.Razorpay) {
+        resolve();
+        return;
+      }
       existingScript.addEventListener('load', () => resolve());
-      existingScript.addEventListener('error', () => reject(new Error('Failed to load payment gateway.')));
+      existingScript.addEventListener('error', () => {
+        razorpayLoadPromise = null;
+        reject(new Error('Failed to load payment gateway.'));
+      });
       return;
     }
     const script = document.createElement('script');
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load payment gateway. Please check your internet connection and try again.'));
+    script.onerror = () => {
+      razorpayLoadPromise = null;
+      reject(new Error('Failed to load payment gateway. Please check your internet connection and try again.'));
+    };
     document.body.appendChild(script);
   });
+  return razorpayLoadPromise;
 };
 
 const Subscription = () => {
@@ -104,6 +118,16 @@ const Subscription = () => {
     setLoading(true);
 
     try {
+      if (!user?.uid) {
+        toast({
+          title: "Authentication Required",
+          description: "Please sign in before making a payment.",
+          variant: "destructive"
+        });
+        setLoading(false);
+        return;
+      }
+
       await loadRazorpayScript();
 
       const options = {
