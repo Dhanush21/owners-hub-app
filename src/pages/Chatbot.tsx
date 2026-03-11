@@ -12,21 +12,21 @@ import { useNavigate } from "react-router-dom";
 import Header from "@/components/Header";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useAuth } from "@/context/AuthContext";
-
-interface Message {
-  id: string;
-  content: string;
-  sender: "user" | "bot";
-  timestamp: Date;
-  isAnimating?: boolean;
-}
+import {
+  Message,
+  getGlobalChatMessages,
+  getGlobalChatId,
+  setGlobalChatState,
+  clearGlobalChatState,
+  getGlobalHasAttemptedLoad
+} from "@/lib/chatStore";
 
 const Chatbot = () => {
   const { user, userProfile, isGuest } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<Message[]>(getGlobalChatMessages().length > 0 ? getGlobalChatMessages() : [
     {
       id: "1",
-      content: `Hi${isGuest ? '' : `, ${userProfile?.fullName || 'there'}`}! I'm your Owners Hub assistant. I can answer questions about your app data (like payments) and help you navigate to sections such as Payments, Residents, or the Dashboard.${isGuest ? ' Note: You\'re browsing as a guest with limited access.' : ''}`,
+      content: `Hi${isGuest ? '' : `, ${userProfile?.fullName || 'there'} `}! I'm your Owners Hub assistant. I can answer questions about your app data (like payments) and help you navigate to sections such as Payments, Residents, or the Dashboard.${isGuest ? ' Note: You\'re browsing as a guest with limited access.' : ''}`,
       sender: "bot",
       timestamp: new Date(),
     },
@@ -34,21 +34,27 @@ const Chatbot = () => {
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [paymentsData, setPaymentsData] = useState<any[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [isLoadingChat, setIsLoadingChat] = useState(true);
+  const [residentsData, setResidentsData] = useState<any[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(getGlobalChatId());
+  const [isLoadingChat, setIsLoadingChat] = useState(!getGlobalHasAttemptedLoad());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Gemini API configuration
-  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-  const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  // Sync state to global store whenever it changes
+  useEffect(() => {
+    setGlobalChatState(messages, currentChatId, true);
+  }, [messages, currentChatId]);
+
+
+  // Backend API configuration for Help Bot
+  const BACKEND_URL = "http://localhost:3001/api/chat";
 
   // Chat persistence functions
   const saveMessage = async (message: Message) => {
     if (!user || isGuest) return;
-    
+
     try {
       const chatRef = collection(db, "chats");
       const messageData = {
@@ -58,11 +64,11 @@ const Chatbot = () => {
         userId: user.uid,
         chatId: currentChatId
       };
-      
+
       if (currentChatId) {
         // Add message to existing chat
         await addDoc(collection(db, "chats", currentChatId, "messages"), messageData);
-        
+
         // Update chat's updatedAt timestamp
         const chatDocRef = doc(db, "chats", currentChatId);
         await updateDoc(chatDocRef, {
@@ -76,7 +82,7 @@ const Chatbot = () => {
           updatedAt: serverTimestamp(),
           title: message.content.substring(0, 50) + (message.content.length > 50 ? "..." : "")
         });
-        
+
         setCurrentChatId(newChatRef.id);
         await addDoc(collection(db, "chats", newChatRef.id, "messages"), messageData);
       }
@@ -86,21 +92,21 @@ const Chatbot = () => {
   };
 
   const loadChatHistory = async () => {
-    if (!user || isGuest) {
+    if (!user || isGuest || getGlobalHasAttemptedLoad()) {
       setIsLoadingChat(false);
       return;
     }
-    
+
     try {
       const chatsRef = collection(db, "chats");
       const userChatsQuery = query(chatsRef, where("userId", "==", user.uid));
       const chatsSnapshot = await getDocs(userChatsQuery);
-      
+
       if (!chatsSnapshot.empty) {
         // Get the most recent chat by comparing timestamps
         let latestChat = chatsSnapshot.docs[0];
         let latestTime = latestChat.data().updatedAt || latestChat.data().createdAt;
-        
+
         for (const chatDoc of chatsSnapshot.docs) {
           const chatData = chatDoc.data();
           const chatTime = chatData.updatedAt || chatData.createdAt;
@@ -109,14 +115,14 @@ const Chatbot = () => {
             latestTime = chatTime;
           }
         }
-        
+
         setCurrentChatId(latestChat.id);
-        
+
         // Load messages from the latest chat
         const messagesRef = collection(db, "chats", latestChat.id, "messages");
         const messagesQuery = query(messagesRef);
         const messagesSnapshot = await getDocs(messagesQuery);
-        
+
         const loadedMessages = messagesSnapshot.docs.map(doc => {
           const data = doc.data();
           return {
@@ -127,10 +133,10 @@ const Chatbot = () => {
             isAnimating: false
           };
         }) as Message[];
-        
+
         // Sort by timestamp
         loadedMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-        
+
         if (loadedMessages.length > 0) {
           setMessages(loadedMessages);
         }
@@ -165,7 +171,7 @@ const Chatbot = () => {
       const viewportHeight = window.visualViewport?.height || window.innerHeight;
       const documentHeight = document.documentElement.clientHeight;
       const keyboardHeight = documentHeight - viewportHeight;
-      
+
       setKeyboardHeight(keyboardHeight);
       setIsKeyboardOpen(keyboardHeight > 100);
     };
@@ -180,7 +186,7 @@ const Chatbot = () => {
 
     window.visualViewport?.addEventListener('resize', handleResize);
     inputRef.current?.addEventListener('focus', handleFocus);
-    
+
     return () => {
       window.visualViewport?.removeEventListener('resize', handleResize);
       inputRef.current?.removeEventListener('focus', handleFocus);
@@ -199,7 +205,18 @@ const Chatbot = () => {
         console.error("Failed to load payments for chatbot context", err);
       }
     };
+    const fetchResidents = async () => {
+      try {
+        const residentsRef = collection(db, "residents");
+        const snapshot = await getDocs(residentsRef);
+        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as any) }));
+        setResidentsData(docs);
+      } catch (err) {
+        console.error("Failed to load residents for chatbot context", err);
+      }
+    };
     fetchPayments();
+    fetchResidents();
   }, []);
 
   // Load chat history on component mount
@@ -230,7 +247,7 @@ const Chatbot = () => {
     queryPayments: async (filters: any = {}) => {
       try {
         let q = query(collection(db, "payments"), orderBy("created_at", "desc"));
-        
+
         if (filters.customer_name) {
           q = query(q, where("customer_name", ">=", filters.customer_name), where("customer_name", "<=", filters.customer_name + "\uf8ff"));
         }
@@ -238,7 +255,7 @@ const Chatbot = () => {
         if (filters.amount_min) q = query(q, where("amount", ">=", filters.amount_min));
         if (filters.amount_max) q = query(q, where("amount", "<=", filters.amount_max));
         if (filters.limit) q = query(q, limit(filters.limit));
-        
+
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       } catch (error) {
@@ -253,14 +270,14 @@ const Chatbot = () => {
     queryResidents: async (filters: any = {}) => {
       try {
         let q = query(collection(db, "residents"));
-        
+
         if (filters.name) {
           q = query(q, where("name", ">=", filters.name), where("name", "<=", filters.name + "\uf8ff"));
         }
         if (filters.unit) q = query(q, where("unit", "==", filters.unit));
         if (filters.status) q = query(q, where("status", "==", filters.status));
         if (filters.limit) q = query(q, limit(filters.limit));
-        
+
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       } catch (error) {
@@ -272,13 +289,13 @@ const Chatbot = () => {
     queryProperties: async (filters: any = {}) => {
       try {
         let q = query(collection(db, "properties"));
-        
+
         if (filters.name) {
           q = query(q, where("name", ">=", filters.name), where("name", "<=", filters.name + "\uf8ff"));
         }
         if (filters.status) q = query(q, where("status", "==", filters.status));
         if (filters.limit) q = query(q, limit(filters.limit));
-        
+
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       } catch (error) {
@@ -299,262 +316,86 @@ const Chatbot = () => {
     }
   };
 
-const getAIResponse = async (question: string): Promise<string> => {
-  try {
-    // First check for data-specific queries
-    const dataAnswer = answerFromData(question);
-    if (dataAnswer) {
-      return dataAnswer;
-    }
-
-    // Check if we should navigate instead of getting AI response
-    if (maybeNavigate(question)) {
-      return "Taking you there now...";
-    }
-
-    // Use Gemini REST API with tool calling capabilities
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for efficiency
-
+  const getAIResponse = async (question: string): Promise<string> => {
     try {
-      // Streamlined tool definitions
-      const tools = [
-        {
-          name: "queryPayments",
-          description: "Query payments",
-          parameters: {
-            type: "object",
-            properties: {
-              customer_name: { type: "string" },
-              status: { type: "string" },
-              amount_min: { type: "number" },
-              amount_max: { type: "number" },
-              limit: { type: "number" }
-            }
-          }
-        },
-        {
-          name: "queryResidents", 
-          description: "Query residents",
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              unit: { type: "string" },
-              status: { type: "string" },
-              limit: { type: "number" }
-            }
-          }
-        },
-        {
-          name: "queryProperties",
-          description: "Query properties", 
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              status: { type: "string" },
-              limit: { type: "number" }
-            }
-          }
-        },
-        {
-          name: "getDocument",
-          description: "Get document by ID",
-          parameters: {
-            type: "object",
-            properties: {
-              collectionName: { type: "string" },
-              docId: { type: "string" }
-            },
-            required: ["collectionName", "docId"]
-          }
-        }
-      ];
+      // 1. Check for data-specific queries first (fast local check)
+      const dataAnswer = answerFromData(question);
+      if (dataAnswer) return dataAnswer;
 
-      const requestBody = {
-        contents: [
-          {
-            parts: [
-              {
-                text: `Property management assistant. ${isGuest ? 'Guest user.' : `User: ${userProfile?.fullName || 'User'}.`} Help with payments, residents, properties. Query database when needed. Respond naturally, not technically. Be concise and friendly.
-
-Q: ${question}`
-              }
-            ]
-          }
-        ],
-        tools: [
-          {
-            function_declarations: tools
-          }
-        ]
-      };
-
-      // Validate API key
-      if (!GEMINI_API_KEY || GEMINI_API_KEY === "" || GEMINI_API_KEY === "your-api-key-here") {
-        throw new Error("Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.");
-      }
-
-      // Use query parameter format for API key (more reliable)
-      const apiUrl = `${GEMINI_API_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-      
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
+      // 2. Call local backend
+      console.log("Fetching response from backend...");
+      const response = await fetch("http://localhost:3001/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: question }),
       });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `Gemini API responded with status: ${response.status}`;
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          if (errorData.error?.message) {
-            errorMessage += ` - ${errorData.error.message}`;
-          } else if (errorData.error) {
-            errorMessage += ` - ${JSON.stringify(errorData.error)}`;
-          }
-        } catch {
-          if (errorText) {
-            errorMessage += ` - ${errorText.substring(0, 200)}`;
-          }
-        }
-        
-        console.error('Gemini API Error:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText
-        });
-        
-        throw new Error(errorMessage);
-      }
 
       const data = await response.json();
 
-      
-      // Handle tool calling if Gemini requests it
-      if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-        const parts = data.candidates[0].content.parts;
-        const functionCalls = parts.filter((part: any) => part.functionCall);
-        
-        if (functionCalls.length > 0) {
-          let toolResults = [];
-          
-          for (const functionCall of functionCalls) {
-            const { name, args } = functionCall.functionCall;
-            
-            try {
-              let result;
-              switch (name) {
-                case "queryPayments":
-                  result = await firebaseTools.queryPayments(args);
-                  break;
-                case "queryResidents":
-                  result = await firebaseTools.queryResidents(args);
-                  break;
-                case "queryProperties":
-                  result = await firebaseTools.queryProperties(args);
-                  break;
-                case "getDocument":
-                  result = await firebaseTools.getDocument(args.collectionName, args.docId);
-                  break;
-                default:
-                  result = { error: "Unknown tool" };
-              }
-              
-              toolResults.push({
-                functionResponse: {
-                  name: name,
-                  response: result
-                }
-              });
-            } catch (toolError) {
-              toolResults.push({
-                functionResponse: {
-                  name: name,
-                  response: { error: toolError.message }
-                }
-              });
-            }
-          }
-          
-          // Send tool results back to Gemini for final response
-          const finalRequestBody = {
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Based on this data, provide a natural, user-friendly response. Don't show technical details or function names. Format as a conversation:
+      if (response.status === 429) {
+        return data.details || "The AI service is busy. Please wait a minute before trying again.";
+      }
 
-${JSON.stringify(toolResults)}`
-                  }
-                ]
-              }
-            ]
-          };
-          
-          const finalApiUrl = `${GEMINI_API_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-          const finalResponse = await fetch(finalApiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(finalRequestBody),
-            signal: controller.signal
-          });
-          
-          if (finalResponse.ok) {
-            const finalData = await finalResponse.json();
-            let response = finalData.candidates?.[0]?.content?.parts?.[0]?.text || "I found some data but couldn't process it properly.";
-            
-            // Clean up technical formatting if needed
-            if (response.includes('**1. Payments (`queryPayments`)**') || response.includes('function returned')) {
-              response = response
-                .replace(/\*\*.*?\(`.*?`\):\*\*/g, '')
-                .replace(/The `.*?` function returned/g, 'I found')
-                .replace(/Payment ID:/g, 'Payment:')
-                .replace(/User ID:/g, 'User:')
-                .replace(/Created At:/g, 'Date:')
-                .replace(/`/g, '')
-                .replace(/\*\*/g, '');
-            }
-            
-            return response;
-          } else {
-            const errorText = await finalResponse.text();
-            console.error('Final response error:', finalResponse.status, errorText);
-            throw new Error(`Failed to get final response: ${finalResponse.status}`);
-          }
+      if (!response.ok) {
+        throw new Error(`Backend error: ${response.status}`);
+      }
+
+      // 3. Handle specific actions from backend (redirects)
+      if (data.action === "redirect") {
+        const pageName = data.page;
+        // The backend returns values like "Payments", "Residents", etc.
+        if (maybeNavigate(pageName)) {
+          return `Taking you to the ${pageName} page now...`;
         }
       }
-      
-      // Return regular response if no tool calls
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm here to help with your property management needs!";
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      throw fetchError;
+
+      // 4. Return helpful AI response
+      return data.response || "I'm here to help with your Owners Hub needs!";
+
+    } catch (error) {
+      console.error('Help Bot Error:', error);
+      return "The help bot service is currently recovering. Please try again or ask about payments.";
     }
-  } catch (error) {
-    console.error('AI Error:', error);
-    
-    // Concise fallback responses
-    if (error.name === 'AbortError') {
-      return "Timeout. Try again or ask about payment data.";
-    }
-    
-    return "AI service unavailable. I can still help with payment queries.";
-  }
-};
+  };
 
   const answerFromData = (question: string): string | null => {
     const q = question.toLowerCase();
+
+    // Resident intents
+    if (q.includes("how many residents") || q.includes("number of residents") || q.includes("total residents")) {
+      return `There are currently ${residentsData.length} residents registered in Owners Hub.`;
+    }
+
+    // Collection / Payments intents
+    if (q.includes("yesterday's collection") || q.includes("yesterday collection") || q.includes("collection yesterday")) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const yesterdayPayments = paymentsData.filter(p => {
+        const date = coerceDate(p.created_at);
+        return date >= yesterday && date < today;
+      });
+
+      const total = yesterdayPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+      return `Yesterday's total collection was ₹${total.toLocaleString()}.`;
+    }
+
+    if (q.includes("today's collection") || q.includes("collection today")) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const todayPayments = paymentsData.filter(p => {
+        const date = coerceDate(p.created_at);
+        return date >= today;
+      });
+
+      const total = todayPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+      return `Today's collection so far is ₹${total.toLocaleString()}.`;
+    }
 
     // Payments intents
     if (q.includes("last payment") || q.includes("recent payment")) {
@@ -570,9 +411,9 @@ ${JSON.stringify(toolResults)}`
       return `I found ${paymentsData.length} payment${paymentsData.length === 1 ? '' : 's'}.`;
     }
 
-    if (q.includes("total paid") || q.includes("total amount") || q.includes("sum of payments") || q.includes("total revenue")) {
+    if (q.includes("total paid") || q.includes("total amount") || q.includes("sum of payments") || q.includes("total revenue") || q.includes("total collection")) {
       const total = paymentsData.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-      return `Your total recorded payments sum to ₹${total.toLocaleString()}.`;
+      return `Your total recorded collection sum to ₹${total.toLocaleString()}.`;
     }
 
     if (q.includes("status")) {
@@ -613,23 +454,23 @@ ${JSON.stringify(toolResults)}`
       const chatsRef = collection(db, "chats");
       const userChatsQuery = query(chatsRef, where("userId", "==", user.uid));
       const chatsSnapshot = await getDocs(userChatsQuery);
-      
+
       // Delete all messages in each chat, then delete the chat
       for (const chatDoc of chatsSnapshot.docs) {
         const chatId = chatDoc.id;
-        
+
         // Delete all messages in this chat
         const messagesRef = collection(db, "chats", chatId, "messages");
         const messagesSnapshot = await getDocs(messagesRef);
-        
+
         for (const messageDoc of messagesSnapshot.docs) {
           await deleteDoc(doc(db, "chats", chatId, "messages", messageDoc.id));
         }
-        
+
         // Delete the chat document
         await deleteDoc(doc(db, "chats", chatId));
       }
-      
+
       // Reset UI state
       const welcomeMessage = {
         id: "1",
@@ -637,10 +478,11 @@ ${JSON.stringify(toolResults)}`
         sender: "bot" as const,
         timestamp: new Date(),
       };
-      
+
       setMessages([welcomeMessage]);
       setCurrentChatId(null);
-      
+      clearGlobalChatState();
+
       console.log("All chat data cleared from database");
     } catch (error) {
       console.error("Error clearing chat data:", error);
@@ -648,90 +490,90 @@ ${JSON.stringify(toolResults)}`
     }
   };
 
-const sendMessage = async () => {
-  if (!inputMessage.trim() || isLoading) return;
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
 
-  // Check if this is a navigation command first
-  if (maybeNavigate(inputMessage)) {
-    setInputMessage("");
-    return; // Navigation will happen via the maybeNavigate function
-  }
+    // Check if this is a navigation command first
+    if (maybeNavigate(inputMessage)) {
+      setInputMessage("");
+      return; // Navigation will happen via the maybeNavigate function
+    }
 
-  const userMessage: Message = {
-    id: Date.now().toString(),
-    content: inputMessage,
-    sender: "user",
-    timestamp: new Date(),
-    isAnimating: true,
-  };
-
-  setMessages((prev) => [...prev, userMessage]);
-  setInputMessage("");
-  setIsLoading(true);
-
-  // Save user message to database
-  await saveMessage(userMessage);
-
-  // Remove animation class after animation completes
-  setTimeout(() => {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === userMessage.id ? { ...msg, isAnimating: false } : msg
-      )
-    );
-  }, 300);
-
-  try {
-    const responseText = await getAIResponse(inputMessage);
-
-    const botMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      content: responseText,
-      sender: "bot",
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: inputMessage,
+      sender: "user",
       timestamp: new Date(),
       isAnimating: true,
     };
 
-    setMessages((prev) => [...prev, botMessage]);
+    setMessages((prev) => [...prev, userMessage]);
+    setInputMessage("");
+    setIsLoading(true);
 
-    // Save bot message to database
-    await saveMessage(botMessage);
+    // Save user message to database
+    await saveMessage(userMessage);
 
+    // Remove animation class after animation completes
     setTimeout(() => {
       setMessages((prev) =>
-        prev.map((msg) => (msg.id === botMessage.id ? { ...msg, isAnimating: false } : msg))
+        prev.map((msg) =>
+          msg.id === userMessage.id ? { ...msg, isAnimating: false } : msg
+        )
       );
     }, 300);
-  } catch (error) {
-    console.error("Error sending message:", error);
-    let errorContent = "Sorry, I hit an unexpected error. Please try again.";
-    
-    if (error instanceof Error) {
-      if (error.message.includes("API key is not configured")) {
-        errorContent = "⚠️ Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.";
-      } else if (error.message.includes("403")) {
-        errorContent = "⚠️ Authentication failed. Please check your Gemini API key in the .env file. The API key may be invalid or expired.";
-      } else if (error.message.includes("401")) {
-        errorContent = "⚠️ Invalid API key. Please verify your VITE_GEMINI_API_KEY in the .env file.";
-      } else if (error.message.includes("429")) {
-        errorContent = "⚠️ Rate limit exceeded. Please try again in a moment.";
-      } else if (error.message) {
-        errorContent = `⚠️ ${error.message}`;
+
+    try {
+      const responseText = await getAIResponse(inputMessage);
+
+      const botMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: responseText,
+        sender: "bot",
+        timestamp: new Date(),
+        isAnimating: true,
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+
+      // Save bot message to database
+      await saveMessage(botMessage);
+
+      setTimeout(() => {
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === botMessage.id ? { ...msg, isAnimating: false } : msg))
+        );
+      }, 300);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      let errorContent = "Sorry, I hit an unexpected error. Please try again.";
+
+      if (error instanceof Error) {
+        if (error.message.includes("API key is not configured")) {
+          errorContent = "⚠️ Gemini API key is not configured. Please set VITE_GEMINI_API_KEY in your .env file.";
+        } else if (error.message.includes("403")) {
+          errorContent = "⚠️ Authentication failed. Please check your Gemini API key in the .env file. The API key may be invalid or expired.";
+        } else if (error.message.includes("401")) {
+          errorContent = "⚠️ Invalid API key. Please verify your VITE_GEMINI_API_KEY in the .env file.";
+        } else if (error.message.includes("429")) {
+          errorContent = "⚠️ Rate limit exceeded. Please try again in a moment.";
+        } else if (error.message) {
+          errorContent = `⚠️ ${error.message}`;
+        }
       }
+
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: errorContent,
+        sender: "bot",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+      inputRef.current?.focus();
     }
-    
-    const errorMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      content: errorContent,
-      sender: "bot",
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, errorMessage]);
-  } finally {
-    setIsLoading(false);
-    inputRef.current?.focus();
-  }
-};
+  };
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -742,10 +584,10 @@ const sendMessage = async () => {
   const formatTime = (date: Date) => {
     const now = new Date();
     const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
+
     if (diffInMinutes < 1) return "Just now";
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    
+
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
@@ -757,34 +599,33 @@ const sendMessage = async () => {
     "Open Residents",
     "Open Payments"
   ] : [
+    "How many residents are there?",
+    "What was yesterday's collection?",
     "Show my latest payment",
-    "How many payments are recorded?",
-    "What is the total amount collected?",
-    "What is the status of John Smith's payment?",
+    "What is the total collection?",
     "Show me all residents",
     "Find properties with status active",
-    "Get payment details for customer John",
     "Open Payments",
     "Open Residents",
     "Open Dashboard"
   ];
 
-const maybeNavigate = (text: string): boolean => {
-  const q = text.toLowerCase();
-  if (q.includes("open payments") || q.includes("go to payments") || q.includes("navigate to payments")) {
-    navigate("/payments");
-    return true;
-  }
-  if (q.includes("open residents") || q.includes("go to residents") || q.includes("navigate to residents")) {
-    navigate("/residents");
-    return true;
-  }
-  if (q.includes("open dashboard") || q.includes("go to dashboard") || q.includes("navigate to dashboard")) {
-    navigate("/");
-    return true;
-  }
-  return false;
-};
+  const maybeNavigate = (text: string): boolean => {
+    const q = text.toLowerCase();
+    if (q.includes("open payments") || q.includes("go to payments") || q.includes("navigate to payments")) {
+      navigate("/payments");
+      return true;
+    }
+    if (q.includes("open residents") || q.includes("go to residents") || q.includes("navigate to residents")) {
+      navigate("/residents");
+      return true;
+    }
+    if (q.includes("open dashboard") || q.includes("go to dashboard") || q.includes("navigate to dashboard")) {
+      navigate("/");
+      return true;
+    }
+    return false;
+  };
 
   const handleSuggestionClick = (text: string) => {
     if (!maybeNavigate(text)) {
@@ -795,13 +636,13 @@ const maybeNavigate = (text: string): boolean => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/10 safe-area-top safe-area-bottom mobile-scroll">
       <Header />
-      
-      <main 
+
+      <main
         ref={chatContainerRef}
         className={`
           flex flex-col transition-all duration-300 ease-out keyboard-adjust
-          ${isKeyboardOpen 
-            ? 'h-[calc(100vh-120px)] pb-2' 
+          ${isKeyboardOpen
+            ? 'h-[calc(100vh-120px)] pb-2'
             : 'h-[calc(100vh-180px)] pb-20'
           }
           max-w-5xl mx-auto px-2 sm:px-4 py-4 sm:py-6
@@ -867,22 +708,18 @@ const maybeNavigate = (text: string): boolean => {
               {messages.map((message, index) => (
                 <div
                   key={message.id}
-                  className={`flex items-start gap-2 sm:gap-4 ${
-                    message.sender === "user" ? "flex-row-reverse" : ""
-                  } ${
-                    message.isAnimating ? "animate-fade-in" : ""
-                  }`}
+                  className={`flex items-start gap-2 sm:gap-4 ${message.sender === "user" ? "flex-row-reverse" : ""
+                    } ${message.isAnimating ? "animate-fade-in" : ""
+                    }`}
                 >
-                  <Avatar className={`h-8 w-8 sm:h-11 sm:w-11 flex-shrink-0 ring-2 ring-offset-2 transition-all duration-200 hover-scale ${
-                    message.sender === "user" 
-                      ? "ring-primary/30 ring-offset-background shadow-lg" 
-                      : "ring-muted ring-offset-background shadow-md"
-                  }`}>
-                    <AvatarFallback className={`${
-                      message.sender === "user"
-                        ? "bg-gradient-to-br from-primary via-primary to-primary/90 text-primary-foreground shadow-inner"
-                        : "bg-gradient-to-br from-muted via-muted/80 to-muted/60 shadow-inner"
-                    } transition-all duration-200`}>
+                  <Avatar className={`h-8 w-8 sm:h-11 sm:w-11 flex-shrink-0 ring-2 ring-offset-2 transition-all duration-200 hover-scale ${message.sender === "user"
+                    ? "ring-primary/30 ring-offset-background shadow-lg"
+                    : "ring-muted ring-offset-background shadow-md"
+                    }`}>
+                    <AvatarFallback className={`${message.sender === "user"
+                      ? "bg-gradient-to-br from-primary via-primary to-primary/90 text-primary-foreground shadow-inner"
+                      : "bg-gradient-to-br from-muted via-muted/80 to-muted/60 shadow-inner"
+                      } transition-all duration-200`}>
                       {message.sender === "user" ? (
                         <User className="h-3 w-3 sm:h-5 sm:w-5" />
                       ) : (
@@ -890,13 +727,11 @@ const maybeNavigate = (text: string): boolean => {
                       )}
                     </AvatarFallback>
                   </Avatar>
-                  
-                  <div className={`flex-1 max-w-[85%] sm:max-w-[85%] message-bubble ${
-                    message.sender === "user" ? "text-right" : ""
-                  }`}>
-                    <div className={`group relative ${
-                      message.sender === "user" ? "ml-auto" : ""
+
+                  <div className={`flex-1 max-w-[85%] sm:max-w-[85%] message-bubble ${message.sender === "user" ? "text-right" : ""
                     }`}>
+                    <div className={`group relative ${message.sender === "user" ? "ml-auto" : ""
+                      }`}>
                       <div className={`
                         relative rounded-2xl sm:rounded-3xl px-3 py-3 sm:px-5 sm:py-4 text-xs sm:text-sm shadow-md backdrop-blur-sm
                         ${message.sender === "user"
@@ -908,18 +743,16 @@ const maybeNavigate = (text: string): boolean => {
                         <p className="whitespace-pre-wrap break-words leading-relaxed">
                           {message.content}
                         </p>
-                        
+
                         {/* Enhanced Message tail */}
-                        <div className={`absolute top-3 sm:top-5 w-2 h-2 sm:w-3 sm:h-3 rotate-45 transition-all duration-300 ${
-                          message.sender === "user"
-                            ? "-right-1 bg-gradient-to-br from-primary to-primary/95 shadow-sm"
-                            : "-left-1 bg-gradient-to-br from-background to-muted/30 border-l border-t border-border/30"
-                        }`} />
+                        <div className={`absolute top-3 sm:top-5 w-2 h-2 sm:w-3 sm:h-3 rotate-45 transition-all duration-300 ${message.sender === "user"
+                          ? "-right-1 bg-gradient-to-br from-primary to-primary/95 shadow-sm"
+                          : "-left-1 bg-gradient-to-br from-background to-muted/30 border-l border-t border-border/30"
+                          }`} />
                       </div>
-                      
-                      <div className={`flex items-center gap-1 sm:gap-2 mt-1 sm:mt-2 text-xs text-muted-foreground ${
-                        message.sender === "user" ? "justify-end" : ""
-                      }`}>
+
+                      <div className={`flex items-center gap-1 sm:gap-2 mt-1 sm:mt-2 text-xs text-muted-foreground ${message.sender === "user" ? "justify-end" : ""
+                        }`}>
                         <MessageCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                         <span className="text-xs">{formatTime(message.timestamp)}</span>
                       </div>
@@ -927,7 +760,7 @@ const maybeNavigate = (text: string): boolean => {
                   </div>
                 </div>
               ))}
-              
+
               {isLoading && (
                 <div className="flex items-start gap-2 sm:gap-4 animate-fade-in">
                   <Avatar className="h-8 w-8 sm:h-11 sm:w-11 ring-2 ring-muted ring-offset-2 ring-offset-background shadow-md">
@@ -948,7 +781,7 @@ const maybeNavigate = (text: string): boolean => {
                   </div>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -992,7 +825,7 @@ const maybeNavigate = (text: string): boolean => {
                     placeholder="Ask me anything about your property management..."
                     className="min-h-[40px] sm:min-h-[44px] max-h-24 sm:max-h-32 resize-none pr-10 sm:pr-12 text-sm border-border/50 focus:border-primary/50 transition-all duration-200 rounded-xl mobile-input mobile-focus touch-target"
                     disabled={isLoading}
-                    style={{ 
+                    style={{
                       scrollbarWidth: 'thin',
                       scrollbarColor: 'hsl(var(--muted)) transparent'
                     }}
