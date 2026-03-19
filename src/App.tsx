@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { hasActiveChat } from "./lib/chatStore";
 
+
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Residents = lazy(() => import("./pages/Residents"));
